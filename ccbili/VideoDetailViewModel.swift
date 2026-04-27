@@ -12,7 +12,7 @@ final class VideoDetailViewModel {
     var lastUpdatedAt: Date?
 
     var descriptionText = ""
-    var uploadTimeText = "涓婁紶鏃堕棿寰呮帴鍏?
+    var uploadTimeText = "上传时间待接入"
     var author: VideoAuthor?
     var comments: [VideoComment] = []
     var relatedVideos: [RelatedVideo] = []
@@ -46,7 +46,7 @@ final class VideoDetailViewModel {
 
         do {
             guard let bvid = item.resolvedBVID else {
-                throw APIError.serverMessage("缂哄皯鏈夋晥鐨?bvid")
+                throw APIError.serverMessage("缺少有效的 bvid")
             }
 
             let detailURL = try buildDetailURL(bvid: bvid)
@@ -224,7 +224,7 @@ final class VideoDetailViewModel {
         guard let mid else {
             return VideoAuthor(
                 name: fallbackName,
-                followerText: "绮変笣鏁板緟鑾峰彇",
+                followerText: "粉丝数待获取",
                 avatarURL: fallbackAvatarURL
             )
         }
