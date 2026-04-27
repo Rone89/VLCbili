@@ -72,15 +72,10 @@ struct HomeView: View {
             .scrollContentBackground(.hidden)
             .navigationTitle("推荐")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     currentUserAvatarView
                 }
-            }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                topBarBackground
             }
             .task {
                 if viewModel.isPlaceholderItem(viewModel.items.first ?? VideoItem(id: "", title: "", subtitle: "")) {
@@ -172,55 +167,6 @@ struct HomeView: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(.white)
             }
-    }
-
-    private var compactBarOpacity: CGFloat {
-        min(max(-scrollOffset / 56, 0), 1)
-    }
-
-    private var topBarBackgroundOpacity: CGFloat {
-        min(max((-scrollOffset - 2) / 36, 0), 1)
-    }
-
-    private var topBarBackground: some View {
-        ZStack {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .opacity(topBarBackgroundOpacity)
-
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(topBarBackgroundOpacity * 0.08),
-                    Color.black.opacity(topBarBackgroundOpacity * 0.03),
-                    Color.clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-        .frame(height: 0)
-        .background(
-            ZStack {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .opacity(topBarBackgroundOpacity)
-
-                LinearGradient(
-                    colors: [
-                        Color.black.opacity(topBarBackgroundOpacity * 0.08),
-                        Color.black.opacity(topBarBackgroundOpacity * 0.03),
-                        Color.clear
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-            .frame(height: 52)
-        )
-        .overlay(alignment: .bottom) {
-            Divider()
-                .opacity(topBarBackgroundOpacity * 0.18)
-        }
     }
 
     private func refreshHome() async {
