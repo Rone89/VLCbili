@@ -70,9 +70,15 @@ struct HomeView: View {
             }
             .background(Color(.systemGroupedBackground))
             .scrollContentBackground(.hidden)
-            .navigationTitle("推荐")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Text("推荐")
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .frame(height: 34, alignment: .center)
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     currentUserAvatarView
                 }
