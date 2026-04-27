@@ -14,6 +14,7 @@ struct PlayURLResponseDTO: Decodable {
 }
 
 struct PlayURLDataDTO: Decodable {
+    let duration: Int?
     let quality: Int?
     let format: String?
     let acceptQuality: [Int]?
@@ -23,6 +24,7 @@ struct PlayURLDataDTO: Decodable {
     let dash: PlayURLDashDTO?
 
     enum CodingKeys: String, CodingKey {
+        case duration = "timelength"
         case quality
         case format
         case acceptQuality = "accept_quality"
@@ -51,7 +53,10 @@ struct PlayURLDashVideoDTO: Decodable {
     let bandwidth: Int?
     let width: Int?
     let height: Int?
+    let frameRate: String?
     let codecs: String?
+    let mimeType: String?
+    let segmentBase: PlayURLSegmentBaseDTO?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -60,7 +65,10 @@ struct PlayURLDashVideoDTO: Decodable {
         case bandwidth
         case width
         case height
+        case frameRate = "frame_rate"
         case codecs
+        case mimeType = "mime_type"
+        case segmentBase = "segment_base"
     }
 }
 
@@ -70,6 +78,8 @@ struct PlayURLDashAudioDTO: Decodable {
     let backupURL: [String]?
     let bandwidth: Int?
     let codecs: String?
+    let mimeType: String?
+    let segmentBase: PlayURLSegmentBaseDTO?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -77,5 +87,17 @@ struct PlayURLDashAudioDTO: Decodable {
         case backupURL = "backup_url"
         case bandwidth
         case codecs
+        case mimeType = "mime_type"
+        case segmentBase = "segment_base"
+    }
+}
+
+struct PlayURLSegmentBaseDTO: Decodable {
+    let initialization: String?
+    let indexRange: String?
+
+    enum CodingKeys: String, CodingKey {
+        case initialization
+        case indexRange = "index_range"
     }
 }

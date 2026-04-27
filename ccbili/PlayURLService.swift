@@ -21,7 +21,7 @@ struct PlayableVideoSource: Equatable {
 }
 
 struct PlayURLService {
-    private let defaultPreferredQuality = 80
+    private let defaultPreferredQuality = 116
 
     func fetchPlayableSource(
         bvid: String,
@@ -37,13 +37,15 @@ struct PlayURLService {
             "User-Agent": AppConfig.defaultUserAgent
         ]
 
-        if let durlSource = try await fetchDURLSource(
-            bvid: bvid,
-            cid: cid,
-            preferredQuality: min(quality, 80),
-            headers: headers
-        ) {
-            return durlSource
+        if quality <= 80 {
+            if let durlSource = try await fetchDURLSource(
+                bvid: bvid,
+                cid: cid,
+                preferredQuality: quality,
+                headers: headers
+            ) {
+                return durlSource
+            }
         }
 
         if let dashSource = try await fetchDASHSource(
@@ -53,6 +55,17 @@ struct PlayURLService {
             headers: headers
         ) {
             return dashSource
+        }
+
+        if quality > 80 {
+            if let durlSource = try await fetchDURLSource(
+                bvid: bvid,
+                cid: cid,
+                preferredQuality: 80,
+                headers: headers
+            ) {
+                return durlSource
+            }
         }
         throw APIError.serverMessage("未获取到可播放的视频地址")
     }
@@ -75,13 +88,38 @@ struct PlayURLService {
             headers: headers
         )
 
-        guard let videoURL = bestDashVideoURL(from: data) else {
+        guard let video = bestDashVideo(from: data) else {
+            return nil
+        }
+
+        if let audio = bestDashAudio(from: data) {
+            let manifestURL = try DashRemuxService().makeMPDManifest(
+                video: video,
+                audio: audio,
+                durationMilliseconds: data.duration,
+                bvid: bvid,
+                cid: cid
+            )
+
+            return PlayableVideoSource(
+                url: manifestURL,
+                audioURL: nil,
+                headers: headers,
+                quality: data.quality,
+                qualityDescription: qualityText(from: data),
+                availableQualities: qualityOptions(from: data),
+                bvid: bvid,
+                cid: cid
+            )
+        }
+
+        guard let videoURL = streamURL(from: video.baseURL, backups: video.backupURL) else {
             return nil
         }
 
         return PlayableVideoSource(
             url: videoURL,
-            audioURL: bestDashAudioURL(from: data),
+            audioURL: nil,
             headers: headers,
             quality: data.quality,
             qualityDescription: qualityText(from: data),
@@ -164,7 +202,7 @@ struct PlayURLService {
         return data
     }
 
-    private func bestDashVideoURL(from data: PlayURLDataDTO) -> URL? {
+    private func bestDashVideo(from data: PlayURLDataDTO) -> PlayURLDashVideoDTO? {
         guard let videos = data.dash?.video, !videos.isEmpty else {
             return nil
         }
@@ -177,22 +215,10 @@ struct PlayURLService {
             return (lhs.bandwidth ?? 0) > (rhs.bandwidth ?? 0)
         }
 
-        for video in sortedVideos {
-            if let baseURLString = video.baseURL,
-               let url = URL(string: baseURLString) {
-                return url
-            }
-
-            if let backupURLString = video.backupURL?.first,
-               let url = URL(string: backupURLString) {
-                return url
-            }
-        }
-
-        return nil
+        return sortedVideos.first(where: { streamURL(from: $0.baseURL, backups: $0.backupURL) != nil })
     }
 
-    private func bestDashAudioURL(from data: PlayURLDataDTO) -> URL? {
+    private func bestDashAudio(from data: PlayURLDataDTO) -> PlayURLDashAudioDTO? {
         guard let audios = data.dash?.audio, !audios.isEmpty else {
             return nil
         }
@@ -205,16 +231,16 @@ struct PlayURLService {
             return (lhs.bandwidth ?? 0) > (rhs.bandwidth ?? 0)
         }
 
-        for audio in sortedAudios {
-            if let baseURLString = audio.baseURL,
-               let url = URL(string: baseURLString) {
-                return url
-            }
+        return sortedAudios.first(where: { streamURL(from: $0.baseURL, backups: $0.backupURL) != nil })
+    }
 
-            if let backupURLString = audio.backupURL?.first,
-               let url = URL(string: backupURLString) {
-                return url
-            }
+    private func streamURL(from baseURL: String?, backups: [String]?) -> URL? {
+        if let baseURL, let url = URL(string: baseURL) {
+            return url
+        }
+
+        if let backupURL = backups?.first(where: { !$0.isEmpty }) {
+            return URL(string: backupURL)
         }
 
         return nil
@@ -234,9 +260,8 @@ struct PlayURLService {
             return []
         }
 
-        let playableQualities = acceptQuality.filter { $0 <= 80 }
-        let qualities = playableQualities.isEmpty ? acceptQuality : playableQualities
-        let preferredOrder = [80, 74, 64, 32, 16, 6]
+        let qualities = acceptQuality
+        let preferredOrder = [127, 126, 125, 120, 116, 112, 80, 74, 64, 32, 16, 6]
         let sortedQualities = qualities.sorted { lhs, rhs in
             let lhsIndex = preferredOrder.firstIndex(of: lhs) ?? Int.max
             let rhsIndex = preferredOrder.firstIndex(of: rhs) ?? Int.max

@@ -641,7 +641,14 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
             options.isSeekedAutoPlay = true
             options.referer = source.headers["Referer"] ?? AppConfig.webBaseURL.absoluteString
             options.userAgent = source.headers["User-Agent"] ?? AppConfig.defaultUserAgent
-            options.appendHeader(source.headers)
+            var headers = source.headers
+            let cookies = HTTPCookieStorage.shared.cookies ?? []
+            if let cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], !cookieHeader.isEmpty {
+                headers["Cookie"] = cookieHeader
+            }
+            headers["Accept"] = "*/*"
+            headers["Connection"] = "keep-alive"
+            options.appendHeader(headers)
             return options
         }
 
