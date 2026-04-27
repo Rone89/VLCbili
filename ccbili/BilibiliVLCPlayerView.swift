@@ -151,6 +151,10 @@ struct BilibiliVLCPlayerView: View {
             VStack(spacing: 0) {
                 topControls
 
+                if let debugDescription = currentSource.debugDescription {
+                    debugOverlay(debugDescription)
+                }
+
                 Spacer()
 
                 bottomProgressControls
@@ -186,6 +190,19 @@ struct BilibiliVLCPlayerView: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
+    }
+
+    private func debugOverlay(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundStyle(.yellow.opacity(0.95))
+            .lineLimit(3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
     }
 
     private var qualityMenu: some View {

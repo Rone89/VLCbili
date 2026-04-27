@@ -17,6 +17,7 @@ struct PlayableVideoSource: Equatable {
     let quality: Int?
     let qualityDescription: String?
     let availableQualities: [VideoQualityOption]
+    let debugDescription: String?
     let bvid: String
     let cid: Int
 }
@@ -125,6 +126,7 @@ struct PlayURLService {
                 quality: selectedQuality,
                 qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
                 availableQualities: qualityOptions(from: data),
+                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH"),
                 bvid: bvid,
                 cid: cid
             )
@@ -142,6 +144,7 @@ struct PlayURLService {
             quality: selectedQuality,
             qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
             availableQualities: qualityOptions(from: data),
+            debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH-NoAudio"),
             bvid: bvid,
             cid: cid
         )
@@ -171,6 +174,7 @@ struct PlayURLService {
                 quality: data.quality,
                 qualityDescription: qualityText(from: data),
                 availableQualities: qualityOptions(from: data),
+                debugDescription: playURLDebugDescription(data: data, selectedVideo: nil, sourceType: "DURL"),
                 bvid: bvid,
                 cid: cid
             )
@@ -206,6 +210,7 @@ struct PlayURLService {
                 quality: source.quality,
                 qualityDescription: source.qualityDescription,
                 availableQualities: mergedQualities,
+                debugDescription: source.debugDescription,
                 bvid: source.bvid,
                 cid: source.cid
             )
@@ -456,6 +461,27 @@ struct PlayURLService {
         }
     }
 
+    private func playURLDebugDescription(
+        data: PlayURLDataDTO,
+        selectedVideo: PlayURLDashVideoDTO?,
+        sourceType: String
+    ) -> String {
+        let accept = (data.acceptQuality ?? [])
+            .map(String.init)
+            .joined(separator: ",")
+        let dashQualities = (data.dash?.video ?? [])
+            .compactMap(\.id)
+            .uniqued()
+            .map(String.init)
+            .joined(separator: ",")
+        let selected = selectedVideo?.id.map(String.init) ?? data.quality.map(String.init) ?? "nil"
+        let resolution = selectedVideo.map { video in
+            "\(video.width ?? 0)x\(video.height ?? 0)@\(video.frameRate ?? "?")"
+        } ?? "durl"
+
+        return "\(sourceType) selected=\(selected) res=\(resolution) accept=[\(accept)] dash=[\(dashQualities)]"
+    }
+
     private func qualityText(from data: PlayURLDataDTO) -> String? {
         if let quality = data.quality,
            let acceptQuality = data.acceptQuality,
@@ -501,6 +527,13 @@ struct PlayURLService {
         default:
             return "清晰度 \(quality)"
         }
+    }
+}
+
+private extension Sequence where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }
 
