@@ -34,6 +34,16 @@ enum BilibiliCookieStore {
         }
     }
 
+    static func cookieHeader() -> String? {
+        restoreToSharedStorage()
+
+        let cookies = bilibiliCookies(from: HTTPCookieStorage.shared.cookies ?? [])
+        guard !cookies.isEmpty else { return nil }
+
+        let header = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"]
+        return header?.isEmpty == false ? header : nil
+    }
+
     private static func bilibiliCookies(from cookies: [HTTPCookie]) -> [HTTPCookie] {
         cookies.filter { cookie in
             cookie.domain.contains("bilibili.com") || cookie.domain.contains("biligame.com")

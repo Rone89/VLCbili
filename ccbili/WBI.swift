@@ -51,7 +51,11 @@ actor WBI {
         }
 
         let url = AppConfig.apiBaseURL.appending(path: "/x/web-interface/nav")
-        let json = try await APIClient.shared.getJSON(url: url)
+        var headers = ["User-Agent": AppConfig.desktopUserAgent]
+        if let cookieHeader = BilibiliCookieStore.cookieHeader() {
+            headers["Cookie"] = cookieHeader
+        }
+        let json = try await APIClient.shared.getJSON(url: url, headers: headers)
 
         guard
             let data = json["data"] as? [String: Any],

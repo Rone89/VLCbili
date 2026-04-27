@@ -33,11 +33,14 @@ struct PlayURLService {
         let quality = preferredQuality ?? defaultPreferredQuality
         let referer = "\(AppConfig.webBaseURL.absoluteString)/video/\(bvid)"
 
-        let headers = [
+        var headers = [
             "Referer": referer,
             "Origin": AppConfig.webBaseURL.absoluteString,
-            "User-Agent": AppConfig.defaultUserAgent
+            "User-Agent": AppConfig.desktopUserAgent
         ]
+        if let cookieHeader = BilibiliCookieStore.cookieHeader() {
+            headers["Cookie"] = cookieHeader
+        }
 
         if quality <= 80 {
             if let durlSource = try await fetchDURLSource(
@@ -277,6 +280,10 @@ struct PlayURLService {
 
         guard response.code == 0, let data = response.data else {
             throw APIError.serverMessage(response.message.isEmpty ? "播放地址获取失败" : response.message)
+        }
+
+        guard preferredQuality <= 80 || (data.acceptQuality ?? []).contains(where: { $0 >= 80 }) else {
+            throw APIError.serverMessage("当前播放接口只返回了 720P 及以下清晰度，请确认账号已登录且具备高清视频权限")
         }
 
         return data
