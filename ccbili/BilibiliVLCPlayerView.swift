@@ -206,7 +206,7 @@ struct BilibiliVLCPlayerView: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Text(currentSource.qualityDescription ?? "清晰�?)
+                Text(currentSource.qualityDescription ?? "Quality")
                     .font(.caption.weight(.semibold))
 
                 Image(systemName: "chevron.down")
@@ -266,10 +266,10 @@ struct BilibiliVLCPlayerView: View {
 
     private var fallbackQualities: [VideoQualityOption] {
         [
-            VideoQualityOption(quality: 32, description: "480P 清晰"),
-            VideoQualityOption(quality: 64, description: "720P 高清"),
-            VideoQualityOption(quality: 80, description: "1080P 高清"),
-            VideoQualityOption(quality: 112, description: "1080P+ 高码�?)
+            VideoQualityOption(quality: 32, description: "480P"),
+            VideoQualityOption(quality: 64, description: "720P"),
+            VideoQualityOption(quality: 80, description: "1080P"),
+            VideoQualityOption(quality: 112, description: "1080P+"),
         ]
     }
 
@@ -351,7 +351,7 @@ struct BilibiliVLCPlayerView: View {
             pendingSeekPosition = previousPosition
             schedulePendingSeekIfNeeded()
         } catch {
-            qualityErrorMessage = "切换失败：\(error.localizedDescription)"
+            qualityErrorMessage = "åæ¢å¤±è´¥ï¼\(error.localizedDescription)"
         }
 
         isSwitchingQuality = false
