@@ -100,15 +100,24 @@ struct BilibiliVLCPlayerView: View {
     }
 
     private var videoSurface: some View {
-        BilibiliVLCVideoSurface(
-            source: currentSource,
-            playbackState: playbackState,
-            commandCenter: commandCenter,
-            isFullscreen: isFullscreenPresented,
-            fullscreenOrientation: fullscreenOrientation
-        )
-        .id(surfaceID)
-        .background(.black)
+        Group {
+            if currentSource.isDASHSeparated {
+                MPVPlayerView(
+                    source: currentSource,
+                    commandCenter: commandCenter
+                )
+            } else {
+                BilibiliVLCVideoSurface(
+                    source: currentSource,
+                    playbackState: playbackState,
+                    commandCenter: commandCenter,
+                    isFullscreen: isFullscreenPresented,
+                    fullscreenOrientation: fullscreenOrientation
+                )
+            }
+        }
+            .id(surfaceID)
+            .background(.black)
     }
 
     @ViewBuilder

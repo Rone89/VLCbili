@@ -12,6 +12,7 @@ struct VideoQualityOption: Identifiable, Equatable, Hashable {
 struct PlayableVideoSource: Equatable {
     let url: URL
     let audioURL: URL?
+    let isDASHSeparated: Bool
     let headers: [String: String]
     let quality: Int?
     let qualityDescription: String?
@@ -21,7 +22,7 @@ struct PlayableVideoSource: Equatable {
 }
 
 struct PlayURLService {
-    private let defaultPreferredQuality = 80
+    private let defaultPreferredQuality = 112
     private let qualityFallbackOrder = [112, 116, 80, 74, 64, 32, 16, 6]
 
     func fetchPlayableSource(
@@ -113,18 +114,10 @@ struct PlayURLService {
                 return nil
             }
 
-            let mergedURL = try await DashRemuxService().remuxToMP4(
-                videoURL: videoURL,
-                audioURL: audioURL,
-                headers: headers,
-                bvid: bvid,
-                cid: cid,
-                quality: selectedQuality
-            )
-
             return PlayableVideoSource(
-                url: mergedURL,
-                audioURL: nil,
+                url: videoURL,
+                audioURL: audioURL,
+                isDASHSeparated: true,
                 headers: headers,
                 quality: selectedQuality,
                 qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
@@ -141,6 +134,7 @@ struct PlayURLService {
         return PlayableVideoSource(
             url: videoURL,
             audioURL: nil,
+            isDASHSeparated: false,
             headers: headers,
             quality: selectedQuality,
             qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
@@ -169,6 +163,7 @@ struct PlayURLService {
             return PlayableVideoSource(
                 url: durlURL,
                 audioURL: nil,
+                isDASHSeparated: false,
                 headers: headers,
                 quality: data.quality,
                 qualityDescription: qualityText(from: data),
@@ -203,6 +198,7 @@ struct PlayURLService {
             return PlayableVideoSource(
                 url: source.url,
                 audioURL: source.audioURL,
+                isDASHSeparated: source.isDASHSeparated,
                 headers: source.headers,
                 quality: source.quality,
                 qualityDescription: source.qualityDescription,
@@ -259,6 +255,8 @@ struct PlayURLService {
             "cid": String(cid),
             "qn": String(preferredQuality),
             "fnval": fnval,
+            "fnver": "0",
+            "otype": "json",
             "fourk": "1",
             "platform": "pc",
             "high_quality": "1",
