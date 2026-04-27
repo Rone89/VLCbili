@@ -8,6 +8,7 @@ struct VideoDetailView: View {
     @State private var favoriteViewModel = VideoFavoriteViewModel()
     @State private var player: AVPlayer?
     @State private var playerURL: URL?
+    @State private var playbackPosition: Double = 0
 
     @State private var interactionService = VideoInteractionService()
     @State private var isSubmittingLike = false
@@ -77,7 +78,6 @@ struct VideoDetailView: View {
 
             if !viewModel.hasLoadedContent {
                 await viewModel.load()
-                configurePlayer(for: viewModel.playURL)
                 favoriteViewModel.load(videoID: viewModel.playbackItem.id)
             } else {
                 configurePlayer(for: viewModel.playURL)
@@ -89,7 +89,6 @@ struct VideoDetailView: View {
         }
         .refreshable {
             await viewModel.load()
-            configurePlayer(for: viewModel.playURL)
             favoriteViewModel.load(videoID: viewModel.playbackItem.id)
         }
         .onChange(of: viewModel.playURL) { _, newValue in
@@ -123,7 +122,13 @@ struct VideoDetailView: View {
     @ViewBuilder
     private func videoHeaderSection(height: CGFloat) -> some View {
         if let source = viewModel.playbackSource {
-            BilibiliVLCPlayerView(source: source)
+            BilibiliVLCPlayerView(
+                source: source,
+                initialPosition: playbackPosition,
+                onPositionChange: { position in
+                    playbackPosition = position
+                }
+            )
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
                 .background(.black)
@@ -150,7 +155,10 @@ struct VideoDetailView: View {
                 HStack {
                     Spacer()
 
-                    Label("未就绪", systemImage: "wifi.exclamationmark")
+                    Label(
+                        viewModel.isLoadingPlaybackSource ? "准备中" : "未就绪",
+                        systemImage: viewModel.isLoadingPlaybackSource ? "arrow.triangle.2.circlepath" : "wifi.exclamationmark"
+                    )
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
@@ -168,10 +176,15 @@ struct VideoDetailView: View {
                             .fill(.ultraThinMaterial)
                             .frame(width: 74, height: 74)
 
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 28, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .offset(x: 2)
+                        if viewModel.isLoadingPlaybackSource {
+                            ProgressView()
+                                .controlSize(.large)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .offset(x: 2)
+                        }
                     }
 
                     VStack(spacing: 4) {
@@ -179,7 +192,7 @@ struct VideoDetailView: View {
                             .font(.headline)
                             .foregroundStyle(.primary)
 
-                        Text(viewModel.playbackErrorMessage ?? "正在获取播放地址")
+                        Text(viewModel.playbackErrorMessage ?? playbackPlaceholderText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -193,6 +206,14 @@ struct VideoDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: height)
+    }
+
+    private var playbackPlaceholderText: String {
+        if viewModel.isLoadingPlaybackSource {
+            return "正在获取 1080P 播放地址，评论和推荐会先加载"
+        }
+
+        return "正在获取播放地址"
     }
 
     private var bottomPlaybackOverlay: some View {

@@ -21,7 +21,7 @@ struct PlayableVideoSource: Equatable {
 }
 
 struct PlayURLService {
-    private let defaultPreferredQuality = 112
+    private let defaultPreferredQuality = 80
     private let qualityFallbackOrder = [112, 116, 80, 74, 64, 32, 16, 6]
 
     func fetchPlayableSource(
@@ -78,6 +78,14 @@ struct PlayURLService {
 
     func fetchPlayableURL(bvid: String, cid: Int) async throws -> URL {
         try await fetchPlayableSource(bvid: bvid, cid: cid).url
+    }
+
+    func fetchPreferredHighQualitySource(bvid: String, cid: Int) async throws -> PlayableVideoSource {
+        try await fetchPlayableSource(
+            bvid: bvid,
+            cid: cid,
+            preferredQuality: 112
+        )
     }
 
     private func fetchDASHSource(

@@ -1,4 +1,4 @@
-import Foundation
+﻿import Foundation
 import Observation
 
 @Observable
@@ -6,12 +6,13 @@ final class VideoDetailViewModel {
     let item: VideoItem
 
     var isLoading = false
+    var isLoadingPlaybackSource = false
     var errorMessage: String?
     var playbackErrorMessage: String?
     var lastUpdatedAt: Date?
 
     var descriptionText = ""
-    var uploadTimeText = "上传时间待接入"
+    var uploadTimeText = "涓婁紶鏃堕棿寰呮帴鍏?
     var author: VideoAuthor?
     var comments: [VideoComment] = []
     var relatedVideos: [RelatedVideo] = []
@@ -45,7 +46,7 @@ final class VideoDetailViewModel {
 
         do {
             guard let bvid = item.resolvedBVID else {
-                throw APIError.serverMessage("缺少有效的 bvid")
+                throw APIError.serverMessage("缂哄皯鏈夋晥鐨?bvid")
             }
 
             let detailURL = try buildDetailURL(bvid: bvid)
@@ -71,12 +72,12 @@ final class VideoDetailViewModel {
                 throw APIError.invalidResponse
             }
 
-            descriptionText = detailData.desc ?? "暂无简介"
+            descriptionText = detailData.desc ?? "鏆傛棤绠€浠?
             uploadTimeText = formatUploadTime(from: detailData.pubdate ?? detailData.ctime)
 
             let resolvedCID = detailData.cid ?? detailData.pages?.first?.cid
             let ownerMID = detailData.owner?.mid
-            let ownerName = detailData.owner?.name ?? "未知 UP 主"
+            let ownerName = detailData.owner?.name ?? "鏈煡 UP 涓?
             let ownerFaceURL = normalizedImageURL(from: detailData.owner?.face)
 
             playbackItem = VideoItem(
@@ -88,25 +89,10 @@ final class VideoDetailViewModel {
                 cid: resolvedCID
             )
 
-            if let resolvedCID {
-                do {
-                    let source = try await playURLService.fetchPlayableSource(
-                        bvid: detailData.bvid ?? bvid,
-                        cid: resolvedCID
-                    )
-
-                    playbackSource = source
-                    playURL = source.url
-                } catch {
-                    playbackSource = nil
-                    playURL = nil
-                    playbackErrorMessage = error.localizedDescription
-                }
-            } else {
-                playbackSource = nil
-                playURL = nil
-                playbackErrorMessage = "缺少 cid，暂时无法播放"
-            }
+            preparePlaybackSource(
+                bvid: detailData.bvid ?? bvid,
+                cid: resolvedCID
+            )
 
             author = await buildAuthor(
                 mid: ownerMID,
@@ -121,11 +107,11 @@ final class VideoDetailViewModel {
                     comments = [
                         VideoComment(
                             id: "comment-load-failed",
-                            username: "系统提示",
-                            message: "评论加载失败：\(error.localizedDescription)",
+                            username: "绯荤粺鎻愮ず",
+                            message: "璇勮鍔犺浇澶辫触锛歕(error.localizedDescription)",
                             userID: nil,
                             avatarURL: nil,
-                            timeText: "时间未知"
+                            timeText: "鏃堕棿鏈煡"
                         )
                     ]
                 }
@@ -133,11 +119,11 @@ final class VideoDetailViewModel {
                 comments = [
                     VideoComment(
                         id: "comment-no-aid",
-                        username: "系统提示",
-                        message: "缺少 aid，暂时无法加载评论",
+                        username: "绯荤粺鎻愮ず",
+                        message: "缂哄皯 aid锛屾殏鏃舵棤娉曞姞杞借瘎璁?,
                         userID: nil,
                         avatarURL: nil,
-                        timeText: "时间未知"
+                        timeText: "鏃堕棿鏈煡"
                     )
                 ]
             }
@@ -150,8 +136,8 @@ final class VideoDetailViewModel {
 
                     return RelatedVideo(
                         id: relatedBVID,
-                        title: relatedItem.title ?? "未知标题",
-                        subtitle: relatedItem.owner?.name ?? "未知 UP 主",
+                        title: relatedItem.title ?? "鏈煡鏍囬",
+                        subtitle: relatedItem.owner?.name ?? "鏈煡 UP 涓?,
                         coverURL: normalizedImageURL(from: relatedItem.pic)
                     )
                 }
@@ -164,6 +150,43 @@ final class VideoDetailViewModel {
             playbackSource = nil
             playURL = nil
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func preparePlaybackSource(bvid: String? = nil, cid: Int? = nil) {
+        let resolvedBVID = bvid ?? playbackItem.resolvedBVID
+        let resolvedCID = cid ?? playbackItem.cid
+
+        guard let resolvedBVID, let resolvedCID else {
+            playbackSource = nil
+            playURL = nil
+            playbackErrorMessage = "缺少 cid，暂时无法播放"
+            return
+        }
+
+        isLoadingPlaybackSource = true
+        playbackErrorMessage = nil
+
+        Task { [playURLService] in
+            do {
+                let source = try await playURLService.fetchPlayableSource(
+                    bvid: resolvedBVID,
+                    cid: resolvedCID
+                )
+
+                await MainActor.run {
+                    self.playbackSource = source
+                    self.playURL = source.url
+                    self.isLoadingPlaybackSource = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.playbackSource = nil
+                    self.playURL = nil
+                    self.playbackErrorMessage = error.localizedDescription
+                    self.isLoadingPlaybackSource = false
+                }
+            }
         }
     }
 
@@ -201,7 +224,7 @@ final class VideoDetailViewModel {
         guard let mid else {
             return VideoAuthor(
                 name: fallbackName,
-                followerText: "粉丝数待获取",
+                followerText: "绮変笣鏁板緟鑾峰彇",
                 avatarURL: fallbackAvatarURL
             )
         }
@@ -233,13 +256,13 @@ final class VideoDetailViewModel {
 
             return VideoAuthor(
                 name: fallbackName,
-                followerText: "粉丝 \(formattedCount(follower))",
+                followerText: "绮変笣 \(formattedCount(follower))",
                 avatarURL: face
             )
         } catch {
             return VideoAuthor(
                 name: fallbackName,
-                followerText: "粉丝数获取失败",
+                followerText: "绮変笣鏁拌幏鍙栧け璐?,
                 avatarURL: fallbackAvatarURL
             )
         }
@@ -247,14 +270,14 @@ final class VideoDetailViewModel {
 
     private func formattedCount(_ value: Int) -> String {
         if value >= 10_000 {
-            return String(format: "%.1f万", Double(value) / 10_000)
+            return String(format: "%.1f涓?, Double(value) / 10_000)
         }
         return "\(value)"
     }
 
     private func formatUploadTime(from timestamp: Int?) -> String {
         guard let timestamp else {
-            return "上传时间待接入"
+            return "涓婁紶鏃堕棿寰呮帴鍏?
         }
 
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
