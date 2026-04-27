@@ -1,9 +1,9 @@
 ﻿## 本版本修复
 
-- 通过 Swift Package Manager 直接接入 `FFmpegKit`，app target 现在可以直接 `import FFmpegKit`。
-- 保留现有 KSPlayer 播放链路，先验证 FFmpegKit SPM 在 Xcode 26 / GitHub Actions 下能否稳定解析和链接，避免一次性替换导致播放页不可用。
-- GitHub Release 现在读取 `RELEASE_NOTES.md`，后续发布会包含本版本修复说明。
+- 修复视频有画面但没有声音的问题：播放地址现在优先使用 B 站合流 `durl`，由同一个播放器播放音视频。
+- 移除不稳定的“KSPlayer 播视频 + AVPlayer 另播 DASH 音频”双播放器旁路，避免音频 URL 被拦截或状态不同步导致静音。
+- 清晰度选择暂时限制在当前合流链路可稳定播放的范围内，避免选择 DASH 1080P+ 后再次出现黑屏/无声。
 
-## 后续播放方案
+## 说明
 
-`FFmpegKit` 是编解码/转封装库，不是播放器 UI。若本次 CI 验证通过，下一步可以基于它做 DASH 音视频合流/转封装，再交给播放器播放；如果目标是直接播放 1080P60+，更接近 PiliPlus 的方案是 `libmpv`/media-kit 类播放内核。
+这版目标是先恢复稳定有声播放。1080P60+ 通常是 DASH 分离音视频流，需要下一步用 FFmpegKit 做音视频合流/转封装，或改为 `libmpv`/media-kit 类播放内核后再开放。

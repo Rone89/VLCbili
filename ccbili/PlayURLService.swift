@@ -21,7 +21,7 @@ struct PlayableVideoSource: Equatable {
 }
 
 struct PlayURLService {
-    private let defaultPreferredQuality = 116
+    private let defaultPreferredQuality = 80
 
     func fetchPlayableSource(
         bvid: String,
@@ -37,15 +37,6 @@ struct PlayURLService {
             "User-Agent": AppConfig.defaultUserAgent
         ]
 
-        if let dashSource = try await fetchDASHSource(
-            bvid: bvid,
-            cid: cid,
-            preferredQuality: quality,
-            headers: headers
-        ) {
-            return dashSource
-        }
-
         if let durlSource = try await fetchDURLSource(
             bvid: bvid,
             cid: cid,
@@ -53,6 +44,15 @@ struct PlayURLService {
             headers: headers
         ) {
             return durlSource
+        }
+
+        if let dashSource = try await fetchDASHSource(
+            bvid: bvid,
+            cid: cid,
+            preferredQuality: quality,
+            headers: headers
+        ) {
+            return dashSource
         }
         throw APIError.serverMessage("未获取到可播放的视频地址")
     }
@@ -234,8 +234,10 @@ struct PlayURLService {
             return []
         }
 
-        let preferredOrder = [127, 126, 125, 120, 116, 112, 80, 74, 64, 32, 16, 6]
-        let sortedQualities = acceptQuality.sorted { lhs, rhs in
+        let playableQualities = acceptQuality.filter { $0 <= 80 }
+        let qualities = playableQualities.isEmpty ? acceptQuality : playableQualities
+        let preferredOrder = [80, 74, 64, 32, 16, 6]
+        let sortedQualities = qualities.sorted { lhs, rhs in
             let lhsIndex = preferredOrder.firstIndex(of: lhs) ?? Int.max
             let rhsIndex = preferredOrder.firstIndex(of: rhs) ?? Int.max
 

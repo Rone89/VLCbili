@@ -428,9 +428,6 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
         private weak var playbackState: BilibiliVLCPlaybackState?
         private weak var commandCenter: BilibiliVLCCommandCenter?
         private var currentSource: PlayableVideoSource?
-        private var audioPlayer: AVPlayer?
-        private var audioTimeObserver: Any?
-        private var audioStatusObservation: NSKeyValueObservation?
         private weak var inlineView: UIView?
         private var fullscreenWindow: UIWindow?
         private let fullscreenContainer = UIView()
@@ -556,34 +553,14 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
 
             configureAudioSession()
             player.stop()
-            stopAudio()
 
             let options = makeOptions(for: source)
             player.set(url: source.url, options: options)
-            if let audioURL = source.audioURL {
-                let audioAsset = AVURLAsset(
-                    url: audioURL,
-                    options: ["AVURLAssetHTTPHeaderFieldsKey": audioHeaders(for: source)]
-                )
-                let audioItem = AVPlayerItem(asset: audioAsset)
-                audioPlayer = AVPlayer(playerItem: audioItem)
-                audioStatusObservation = audioItem.observe(\.status, options: [.new]) { [weak self] item, _ in
-                    guard item.status == .readyToPlay else { return }
-                    DispatchQueue.main.async {
-                        self?.syncAudioToVideo()
-                        if self?.player.state.isPlaying == true {
-                            self?.audioPlayer?.play()
-                        }
-                    }
-                }
-            }
             player.play()
-            audioPlayer?.play()
         }
 
         func stop() {
             player.stop()
-            stopAudio()
             exitFullscreen()
             currentSource = nil
         }
@@ -594,11 +571,8 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
 
                 if self.player.state.isPlaying {
                     self.player.pause()
-                    self.audioPlayer?.pause()
                 } else {
                     self.player.play()
-                    self.syncAudioToVideo()
-                    self.audioPlayer?.play()
                 }
 
                 self.updatePlaybackState()
@@ -612,8 +586,6 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
                 }
 
                 self.player.seek(time: duration * position, autoPlay: true) { [weak self] _ in
-                    self?.syncAudioToVideo()
-                    self?.audioPlayer?.play()
                     self?.updatePlaybackState()
                 }
             }
@@ -645,55 +617,6 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
                 playbackState.isPlaying = self.player.state.isPlaying
             }
 
-            syncAudioIfNeeded(videoTime: currentTime)
-        }
-
-        private func syncAudioToVideo() {
-            guard let audioPlayer else { return }
-            let currentTime = player.player.currentPlaybackTime
-            guard currentTime.isFinite, currentTime >= 0 else { return }
-
-            let audioTime = CMTime(seconds: currentTime, preferredTimescale: 600)
-            audioPlayer.seek(to: audioTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        }
-
-        private func syncAudioIfNeeded(videoTime: TimeInterval) {
-            guard let audioPlayer, videoTime.isFinite else { return }
-
-            let audioTime = audioPlayer.currentTime().seconds
-            guard audioTime.isFinite else { return }
-
-            if abs(audioTime - videoTime) > 0.45 {
-                syncAudioToVideo()
-            }
-
-            if player.state.isPlaying, audioPlayer.timeControlStatus != .playing {
-                audioPlayer.play()
-            } else if !player.state.isPlaying, audioPlayer.timeControlStatus == .playing {
-                audioPlayer.pause()
-            }
-        }
-
-        private func stopAudio() {
-            if let audioTimeObserver {
-                audioPlayer?.removeTimeObserver(audioTimeObserver)
-                self.audioTimeObserver = nil
-            }
-            audioStatusObservation = nil
-            audioPlayer?.pause()
-            audioPlayer = nil
-        }
-
-        private func audioHeaders(for source: PlayableVideoSource) -> [String: String] {
-            var headers = source.headers
-            let cookies = HTTPCookieStorage.shared.cookies ?? []
-            let cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"]
-            if let cookieHeader, !cookieHeader.isEmpty {
-                headers["Cookie"] = cookieHeader
-            }
-            headers["Accept"] = "*/*"
-            headers["Connection"] = "keep-alive"
-            return headers
         }
 
         fileprivate static func format(seconds: TimeInterval) -> String {
@@ -754,7 +677,6 @@ extension BilibiliVLCVideoSurface.Coordinator: KSPlayerLayerDelegate {
             playbackState.isPlaying = layer.state.isPlaying
         }
 
-        syncAudioIfNeeded(videoTime: currentTime)
     }
 
     func player(layer: KSPlayerLayer, finish error: Error?) {
