@@ -28,7 +28,6 @@ struct BilibiliVLCPlayerView: View {
     @State private var isSwitchingQuality = false
     @State private var qualityErrorMessage: String?
     @State private var isFullscreenPresented = false
-    @State private var fullscreenReturnPosition: Double?
     @State private var fullscreenOrientation: UIDeviceOrientation = .portrait
     @State private var pendingSeekPosition: Double?
     @State private var surfaceID = UUID()
@@ -51,10 +50,18 @@ struct BilibiliVLCPlayerView: View {
         playerSurface
             .background(.black)
             .clipped()
+            .frame(
+                width: isFullscreenPresented ? fullscreenSize.width : nil,
+                height: isFullscreenPresented ? fullscreenSize.height : nil
+            )
+            .rotationEffect(fullscreenRotation)
+            .frame(
+                width: isFullscreenPresented ? UIScreen.main.bounds.width : nil,
+                height: isFullscreenPresented ? UIScreen.main.bounds.height : nil
+            )
+            .ignoresSafeArea(isFullscreenPresented ? .all : [], edges: .all)
             .statusBarHidden(isFullscreenPresented)
-            .fullScreenCover(isPresented: $isFullscreenPresented) {
-                fullscreenPlayerSurface
-            }
+            .animation(.easeInOut(duration: 0.25), value: isFullscreenPresented)
         .onAppear {
             showControlsTemporarily()
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -76,7 +83,6 @@ struct BilibiliVLCPlayerView: View {
             let orientation = UIDevice.current.orientation
 
             if orientation == .landscapeLeft || orientation == .landscapeRight {
-                fullscreenReturnPosition = playbackState.position
                 fullscreenOrientation = orientation
                 isFullscreenPresented = true
             } else if orientation == .portrait || orientation == .portraitUpsideDown {
@@ -100,34 +106,6 @@ struct BilibiliVLCPlayerView: View {
                 }
 
             playerOverlays
-        }
-    }
-
-    private var fullscreenPlayerSurface: some View {
-        ZStack {
-            videoSurface
-
-            Color.black.opacity(0.001)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    toggleControlsVisibility()
-                }
-
-            playerOverlays
-        }
-        .frame(width: fullscreenSize.width, height: fullscreenSize.height)
-        .background(.black)
-        .rotationEffect(fullscreenRotation)
-        .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
-        .ignoresSafeArea()
-        .onAppear {
-            pendingSeekPosition = fullscreenReturnPosition ?? playbackState.position
-            schedulePendingSeekIfNeeded()
-        }
-        .onDisappear {
-            fullscreenReturnPosition = playbackState.position
-            pendingSeekPosition = playbackState.position
-            schedulePendingSeekIfNeeded()
         }
     }
 

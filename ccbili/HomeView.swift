@@ -142,21 +142,11 @@ struct HomeView: View {
                 )
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("首页推荐")
+                Text("推荐")
                     .font(.system(size: 42, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-
-                Text("持续刷新你可能感兴趣的内容")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.82))
-                    .lineLimit(2)
-
-                Text("为你持续发现新内容")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.62))
-                    .lineLimit(1)
 
                 Spacer(minLength: 0)
             }
