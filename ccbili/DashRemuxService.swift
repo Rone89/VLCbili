@@ -12,8 +12,11 @@ struct DashRemuxService {
     ) async throws -> URL {
         let directory = try workingDirectory(bvid: bvid, cid: cid, quality: quality)
         let outputURL = directory.appendingPathComponent("merged.mp4")
-        if FileManager.default.fileExists(atPath: outputURL.path) {
+        if isPlayableFile(outputURL) {
             return outputURL
+        }
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try FileManager.default.removeItem(at: outputURL)
         }
 
         let videoFile = directory.appendingPathComponent("video.mp4")
@@ -37,8 +40,11 @@ struct DashRemuxService {
     }
 
     private func downloadIfNeeded(from url: URL, to destination: URL, headers: [String: String]) async throws {
-        if FileManager.default.fileExists(atPath: destination.path) {
+        if isPlayableFile(destination) {
             return
+        }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
         }
 
         var request = URLRequest(url: url)
@@ -53,10 +59,15 @@ struct DashRemuxService {
             throw APIError.serverMessage("DASH 分离流下载失败")
         }
 
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
-        }
         try FileManager.default.moveItem(at: temporaryURL, to: destination)
+    }
+
+    private func isPlayableFile(_ url: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber else {
+            return false
+        }
+        return size.intValue > 1024
     }
 
     private func enrichedHeaders(_ headers: [String: String]) -> [String: String] {
@@ -105,19 +116,22 @@ struct DashRemuxService {
             at: .zero
         )
 
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
+        let temporaryOutputURL = outputURL.deletingLastPathComponent()
+            .appendingPathComponent("merged-\(UUID().uuidString).mp4")
 
         guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
             throw APIError.serverMessage("DASH 合流导出器创建失败")
         }
 
-        exporter.outputURL = outputURL
+        exporter.outputURL = temporaryOutputURL
         exporter.outputFileType = .mp4
         exporter.shouldOptimizeForNetworkUse = true
 
         try await exporter.exportAsync()
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try FileManager.default.removeItem(at: outputURL)
+        }
+        try FileManager.default.moveItem(at: temporaryOutputURL, to: outputURL)
         return outputURL
     }
 }

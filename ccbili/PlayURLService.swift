@@ -21,7 +21,8 @@ struct PlayableVideoSource: Equatable {
 }
 
 struct PlayURLService {
-    private let defaultPreferredQuality = 80
+    private let defaultPreferredQuality = 112
+    private let qualityFallbackOrder = [112, 116, 80, 74, 64, 32, 16, 6]
 
     func fetchPlayableSource(
         bvid: String,
@@ -96,6 +97,7 @@ struct PlayURLService {
         guard let video = bestDashVideo(from: data, preferredQuality: preferredQuality) else {
             return nil
         }
+        let selectedQuality = video.id ?? data.quality
 
         if let audio = bestDashAudio(from: data) {
             guard let videoURL = streamURL(from: video.baseURL, backups: video.backupURL),
@@ -109,15 +111,15 @@ struct PlayURLService {
                 headers: headers,
                 bvid: bvid,
                 cid: cid,
-                quality: data.quality
+                quality: selectedQuality
             )
 
             return PlayableVideoSource(
                 url: mergedURL,
                 audioURL: nil,
                 headers: headers,
-                quality: data.quality,
-                qualityDescription: qualityText(from: data),
+                quality: selectedQuality,
+                qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
                 availableQualities: qualityOptions(from: data),
                 bvid: bvid,
                 cid: cid
@@ -132,8 +134,8 @@ struct PlayURLService {
             url: videoURL,
             audioURL: nil,
             headers: headers,
-            quality: data.quality,
-            qualityDescription: qualityText(from: data),
+            quality: selectedQuality,
+            qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
             availableQualities: qualityOptions(from: data),
             bvid: bvid,
             cid: cid
@@ -214,7 +216,7 @@ struct PlayURLService {
             descriptionsByQuality[option.quality] = option.description
         }
 
-        let preferredOrder = [127, 126, 125, 120, 116, 112, 80, 74, 64, 32, 16, 6]
+        let preferredOrder = [112, 116, 80, 74, 64, 32, 16, 6, 120, 125, 126, 127]
         return descriptionsByQuality.keys.sorted { lhs, rhs in
             let lhsIndex = preferredOrder.firstIndex(of: lhs) ?? Int.max
             let rhsIndex = preferredOrder.firstIndex(of: rhs) ?? Int.max
@@ -282,8 +284,12 @@ struct PlayURLService {
             return nil
         }
 
-        let matchingVideos = videos.filter { $0.id == preferredQuality }
-        let candidates = matchingVideos.isEmpty ? videos : matchingVideos
+        let availableQualities = Set(videos.compactMap(\.id))
+        let selectedQuality = qualityFallbackCandidates(for: preferredQuality)
+            .first(where: { availableQualities.contains($0) })
+        let candidates = selectedQuality.map { quality in
+            videos.filter { $0.id == quality }
+        } ?? videos
 
         let sortedVideos = candidates.sorted { lhs, rhs in
             if (lhs.id ?? 0) != (rhs.id ?? 0) {
@@ -294,6 +300,12 @@ struct PlayURLService {
         }
 
         return sortedVideos.first(where: { streamURL(from: $0.baseURL, backups: $0.backupURL) != nil })
+    }
+
+    private func qualityFallbackCandidates(for preferredQuality: Int) -> [Int] {
+        var candidates = [preferredQuality]
+        candidates.append(contentsOf: qualityFallbackOrder.filter { $0 != preferredQuality })
+        return candidates
     }
 
     private func bestDashAudio(from data: PlayURLDataDTO) -> PlayURLDashAudioDTO? {
@@ -339,7 +351,7 @@ struct PlayURLService {
         }
 
         let qualities = acceptQuality
-        let preferredOrder = [127, 126, 125, 120, 116, 112, 80, 74, 64, 32, 16, 6]
+        let preferredOrder = [112, 116, 80, 74, 64, 32, 16, 6, 120, 125, 126, 127]
         let sortedQualities = qualities.sorted { lhs, rhs in
             let lhsIndex = preferredOrder.firstIndex(of: lhs) ?? Int.max
             let rhsIndex = preferredOrder.firstIndex(of: rhs) ?? Int.max
