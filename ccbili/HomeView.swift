@@ -72,16 +72,9 @@ struct HomeView: View {
             .scrollContentBackground(.hidden)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Text("推荐")
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
-                        .frame(height: 34, alignment: .center)
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    currentUserAvatarView
-                }
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                headerBar
             }
             .task {
                 if viewModel.isPlaceholderItem(viewModel.items.first ?? VideoItem(id: "", title: "", subtitle: "")) {
@@ -116,6 +109,22 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    private var headerBar: some View {
+        HStack(alignment: .center) {
+            Text("推荐")
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .foregroundStyle(.primary)
+                .frame(height: 34, alignment: .center)
+
+            Spacer()
+
+            currentUserAvatarView
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
     private var currentUserAvatarView: some View {
