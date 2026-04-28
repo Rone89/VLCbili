@@ -80,19 +80,16 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
 
             if (source.quality ?? 0) > 80 {
                 do {
-                    let item = try await DASHAssetLoader().createPlayerItem(
-                        videoURL: source.url,
-                        audioURL: audioURL,
-                        headers: source.headers,
-                        fallbackDuration: source.duration
-                    )
+                    let manifestURL = try await DashHLSManifestService().makeManifest(for: source)
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
+                        let item = AVPlayerItem(url: manifestURL)
+                        item.preferredForwardBufferDuration = 2
                         self.player.replaceCurrentItem(with: item)
                         self.player.play()
                     }
                 } catch {
-                    print("DASH composition load failed: \(error.localizedDescription)")
+                    print("DASH to HLS load failed: \(error.localizedDescription)")
                 }
                 return
             }
