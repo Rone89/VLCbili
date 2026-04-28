@@ -6,24 +6,28 @@ import libmpv
 final class MPVPlayerController {
     private var mpv: OpaquePointer?
     private var isInitialized = false
+    var timeUpdateHandler: ((TimeInterval, TimeInterval, Bool) -> Void)?
+    private var observerTask: Task<Void, Never>?
 
     init() {
         mpv = mpv_create()
         guard let mpv else { return }
         mpv_request_log_messages(mpv, "warn")
-        setOption("vo", value: "avfoundation")
+        setOption("vo", value: "libmpv")
         setOption("keepaspect", value: "yes")
         setOption("input-default-bindings", value: "no")
         setOption("input-vo-keyboard", value: "no")
-        setOption("hwdec", value: "no")
+        setOption("hwdec", value: "videotoolbox")
         setOption("profile", value: "fast")
         setOption("cache", value: "yes")
-        setOption("demuxer-max-bytes", value: "64MiB")
-        setOption("demuxer-readahead-secs", value: "20")
+        setOption("demuxer-max-bytes", value: "128MiB")
+        setOption("demuxer-readahead-secs", value: "8")
+        setOption("force-seekable", value: "yes")
     }
 
     deinit {
         stop()
+        observerTask?.cancel()
         if let mpv {
             mpv_terminate_destroy(mpv)
         }
@@ -35,15 +39,18 @@ final class MPVPlayerController {
         setOption("wid", format: MPV_FORMAT_INT64, value: &viewPointer)
         if let mpv, mpv_initialize(mpv) >= 0 {
             isInitialized = true
+            startObservingPlayback()
         }
     }
 
     func play(source: PlayableVideoSource) {
         guard isInitialized else { return }
+        configureAudioSession()
         configureHeaders(source.headers)
-        command(["loadfile", source.url.absoluteString, "replace"])
         if let audioURL = source.audioURL {
-            command(["audio-add", audioURL.absoluteString, "select"])
+            command(["loadfile", source.url.absoluteString, "replace", "audio-file=\(audioURL.absoluteString)"])
+        } else {
+            command(["loadfile", source.url.absoluteString, "replace"])
         }
         command(["set", "pause", "no"])
     }
@@ -53,7 +60,13 @@ final class MPVPlayerController {
     }
 
     func stop() {
+        observerTask?.cancel()
+        observerTask = nil
         command(["stop"])
+    }
+
+    func seek(to position: Double) {
+        command(["seek", String(position * 100), "absolute-percent"])
     }
 
     private func configureHeaders(_ headers: [String: String]) {
@@ -65,13 +78,23 @@ final class MPVPlayerController {
         enrichedHeaders["Accept"] = "*/*"
         let headerString = enrichedHeaders
             .map { "\($0.key): \($0.value)" }
-            .joined(separator: ",")
+            .joined(separator: "\n")
         setOption("http-header-fields", value: headerString)
         if let referer = enrichedHeaders["Referer"] {
             setOption("referrer", value: referer)
         }
         if let userAgent = enrichedHeaders["User-Agent"] {
             setOption("user-agent", value: userAgent)
+        }
+    }
+
+    private func configureAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback, options: [])
+            try session.setActive(true)
+        } catch {
+            print("Failed to configure mpv audio session: \(error.localizedDescription)")
         }
     }
 
@@ -90,6 +113,40 @@ final class MPVPlayerController {
         args.withCStringArray { argv in
             _ = mpv_command(mpv, argv)
         }
+    }
+
+    private func startObservingPlayback() {
+        observerTask?.cancel()
+        observerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self else { return }
+                let current = self.doubleProperty("time-pos") ?? 0
+                let duration = self.doubleProperty("duration") ?? 0
+                let paused = self.boolProperty("pause") ?? false
+                await MainActor.run {
+                    self.timeUpdateHandler?(current, duration, !paused)
+                }
+            }
+        }
+    }
+
+    private func doubleProperty(_ name: String) -> Double? {
+        guard let mpv else { return nil }
+        var value = 0.0
+        let result = name.withCString { pointer in
+            mpv_get_property(mpv, pointer, MPV_FORMAT_DOUBLE, &value)
+        }
+        return result >= 0 ? value : nil
+    }
+
+    private func boolProperty(_ name: String) -> Bool? {
+        guard let mpv else { return nil }
+        var value: Int32 = 0
+        let result = name.withCString { pointer in
+            mpv_get_property(mpv, pointer, MPV_FORMAT_FLAG, &value)
+        }
+        return result >= 0 ? value != 0 : nil
     }
 }
 

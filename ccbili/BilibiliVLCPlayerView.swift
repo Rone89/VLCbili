@@ -103,9 +103,12 @@ struct BilibiliVLCPlayerView: View {
     private var videoSurface: some View {
         Group {
             if currentSource.isDASHSeparated {
-                AVFoundationDASHPlayerView(
+                MPVPlayerView(
                     source: currentSource,
-                    commandCenter: commandCenter
+                    playbackState: playbackState,
+                    commandCenter: commandCenter,
+                    isFullscreen: isFullscreenPresented,
+                    fullscreenOrientation: fullscreenOrientation
                 )
             } else {
                 BilibiliVLCVideoSurface(
