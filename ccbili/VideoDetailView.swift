@@ -991,6 +991,13 @@ struct VideoDetailView: View {
             ]
         }
     }
+
+    private func toggleVideoFullscreen() {
+        let shouldEnterFullscreen = !isVideoFullscreen
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isVideoFullscreen = shouldEnterFullscreen
+        }
+    }
 }
 
 private enum DetailTab: Hashable {
@@ -1004,13 +1011,6 @@ private struct PlayerOffsetPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
-    }
-
-    private func toggleVideoFullscreen() {
-        let shouldEnterFullscreen = !isVideoFullscreen
-        withAnimation(.easeInOut(duration: 0.25)) {
-            isVideoFullscreen = shouldEnterFullscreen
-        }
     }
 }
 
