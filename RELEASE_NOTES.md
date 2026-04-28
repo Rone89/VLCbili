@@ -1,9 +1,11 @@
 ﻿## 本版本修复
 
-- 移除播放地址接口“只返回 720P 及以下”的过早错误拦截。
-- 当 DURL 高画质请求没有拿到 1080P+ 时，继续回退到 DASH 并显示诊断信息，而不是直接中断播放。
-- 保留黄色诊断文本，用于继续确认 DURL/DASH 实际返回的清晰度。
+- 参考 PiliPlus 的 UGC 取流实现，主接口改回 `/x/player/wbi/playurl`。
+- WBI 参数同步 PiliPlus：`fnval=4048`、`fourk=1`、`voice_balance=1`、`gaia_source=pre-load`、`isGaiaAvoided=true`、`web_location=1315873`、`try_look=1`。
+- 移除 WBI 请求中的 `platform=pc` / `high_quality`，避免影响高画质 DASH 返回。
+- 旧版 `/x/player/playurl` 仅作为接口失败时的 fallback。
+- 黄色诊断文本增加接口来源：`DASH/wbi` 或 `DASH/legacy`。
 
 ## 说明
 
-请测试后继续反馈黄色诊断文本。如果仍是 `DASH selected=80`，说明 DURL 高画质请求也没有返回可用高画质 URL，但至少不会被错误弹窗挡住。
+请测试后反馈黄色诊断。如果 PiliPlus 参数生效，应看到 `DASH/wbi selected=112` 或 `dash=[112,...]`。

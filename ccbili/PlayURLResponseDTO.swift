@@ -14,6 +14,7 @@ struct PlayURLResponseDTO: Decodable {
 }
 
 struct PlayURLDataDTO: Decodable {
+    var sourceAPI: String?
     let duration: Int?
     let quality: Int?
     let format: String?

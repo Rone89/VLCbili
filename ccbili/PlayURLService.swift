@@ -43,18 +43,20 @@ struct PlayURLService {
             headers["Cookie"] = cookieHeader
         }
 
-        if let durlSource = try await fetchDURLSource(
-            bvid: bvid,
-            cid: cid,
-            preferredQuality: quality,
-            headers: headers
-        ), quality <= 80 || (durlSource.quality ?? 0) >= quality {
-            return await sourceByMergingDASHQualities(
-                into: durlSource,
+        if quality <= 80 {
+            if let durlSource = try await fetchDURLSource(
                 bvid: bvid,
                 cid: cid,
+                preferredQuality: quality,
                 headers: headers
-            )
+            ) {
+                return await sourceByMergingDASHQualities(
+                    into: durlSource,
+                    bvid: bvid,
+                    cid: cid,
+                    headers: headers
+                )
+            }
         }
 
         if let dashSource = try await fetchDASHSource(
@@ -251,6 +253,32 @@ struct PlayURLService {
         fnval: String,
         headers: [String: String]
     ) async throws -> PlayURLDataDTO {
+        do {
+            return try await fetchWBIPlayURLData(
+                bvid: bvid,
+                cid: cid,
+                preferredQuality: preferredQuality,
+                fnval: fnval,
+                headers: headers
+            )
+        } catch {
+            return try await fetchLegacyPlayURLData(
+                bvid: bvid,
+                cid: cid,
+                preferredQuality: preferredQuality,
+                fnval: fnval,
+                headers: headers
+            )
+        }
+    }
+
+    private func fetchLegacyPlayURLData(
+        bvid: String,
+        cid: Int,
+        preferredQuality: Int,
+        fnval: String,
+        headers: [String: String]
+    ) async throws -> PlayURLDataDTO {
         var components = URLComponents(
             url: AppConfig.apiBaseURL.appending(path: "/x/player/playurl"),
             resolvingAgainstBaseURL: false
@@ -281,15 +309,11 @@ struct PlayURLService {
             as: PlayURLResponseDTO.self
         )
 
-        guard response.code == 0, let data = response.data else {
-            return try await fetchWBIPlayURLData(
-                bvid: bvid,
-                cid: cid,
-                preferredQuality: preferredQuality,
-                fnval: fnval,
-                headers: headers
-            )
+        guard response.code == 0, var data = response.data else {
+            throw APIError.serverMessage(response.message.isEmpty ? "播放地址获取失败" : response.message)
         }
+
+        data.sourceAPI = "legacy"
 
         return data
     }
@@ -314,8 +338,10 @@ struct PlayURLService {
             "fnver": "0",
             "otype": "json",
             "fourk": "1",
-            "platform": "pc",
-            "high_quality": "1",
+            "voice_balance": "1",
+            "gaia_source": "pre-load",
+            "isGaiaAvoided": "true",
+            "web_location": "1315873",
             "try_look": "1"
         ])
 
@@ -331,9 +357,11 @@ struct PlayURLService {
             as: PlayURLResponseDTO.self
         )
 
-        guard response.code == 0, let data = response.data else {
+        guard response.code == 0, var data = response.data else {
             throw APIError.serverMessage(response.message.isEmpty ? "播放地址获取失败" : response.message)
         }
+
+        data.sourceAPI = "wbi"
 
         return data
     }
@@ -462,7 +490,7 @@ struct PlayURLService {
         } ?? "durl"
         let durlCount = data.durl?.count ?? 0
 
-        return "\(sourceType) selected=\(selected) res=\(resolution) durl=\(durlCount) accept=[\(accept)] dash=[\(dashQualities)]"
+        return "\(sourceType)/\(data.sourceAPI ?? "?") selected=\(selected) res=\(resolution) durl=\(durlCount) accept=[\(accept)] dash=[\(dashQualities)]"
     }
 
     private func qualityText(from data: PlayURLDataDTO) -> String? {
