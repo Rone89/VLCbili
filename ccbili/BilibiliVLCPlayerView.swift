@@ -101,13 +101,22 @@ struct BilibiliVLCPlayerView: View {
     }
 
     private var videoSurface: some View {
-        BilibiliVLCVideoSurface(
-            source: currentSource,
-            playbackState: playbackState,
-            commandCenter: commandCenter,
-            isFullscreen: isFullscreenPresented,
-            fullscreenOrientation: fullscreenOrientation
-        )
+        Group {
+            if currentSource.isDASHSeparated {
+                MPVPlayerView(
+                    source: currentSource,
+                    commandCenter: commandCenter
+                )
+            } else {
+                BilibiliVLCVideoSurface(
+                    source: currentSource,
+                    playbackState: playbackState,
+                    commandCenter: commandCenter,
+                    isFullscreen: isFullscreenPresented,
+                    fullscreenOrientation: fullscreenOrientation
+                )
+            }
+        }
             .id(surfaceID)
             .background(.black)
     }
@@ -189,6 +198,8 @@ struct BilibiliVLCPlayerView: View {
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundStyle(.yellow.opacity(0.95))
             .lineLimit(3)
+            .minimumScaleFactor(0.65)
+            .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)

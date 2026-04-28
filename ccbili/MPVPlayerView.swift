@@ -42,7 +42,7 @@ struct MPVPlayerView: UIViewRepresentable {
         }
 
         func attach(to view: UIView) {
-            player.attach(to: view.layer)
+            player.attach(to: view)
         }
 
         func play(source: PlayableVideoSource) {

@@ -1,6 +1,6 @@
 ﻿import Foundation
 import AVFoundation
-import QuartzCore
+import UIKit
 import libmpv
 
 final class MPVPlayerController {
@@ -29,10 +29,10 @@ final class MPVPlayerController {
         }
     }
 
-    func attach(to layer: CALayer) {
+    func attach(to view: UIView) {
         guard !isInitialized else { return }
-        var layerPointer = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
-        setOption("wid", format: MPV_FORMAT_INT64, value: &layerPointer)
+        var viewPointer = Int64(Int(bitPattern: Unmanaged.passUnretained(view).toOpaque()))
+        setOption("wid", format: MPV_FORMAT_INT64, value: &viewPointer)
         if let mpv, mpv_initialize(mpv) >= 0 {
             isInitialized = true
         }
@@ -108,3 +108,4 @@ private extension Array where Element == String {
         }
     }
 }
+
