@@ -104,7 +104,6 @@ struct VideoDetailView: View {
             .animation(.easeInOut(duration: 0.25), value: isVideoFullscreen)
         }
         .statusBarHidden(isVideoFullscreen)
-        .toolbar(isVideoFullscreen ? .hidden : .visible, for: .navigationBar)
         .navigationTitle("视频详情")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
