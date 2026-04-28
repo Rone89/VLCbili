@@ -129,16 +129,11 @@ struct DashRemuxService {
 
     private func runFFmpeg(_ arguments: [String]) async throws {
         try await withCheckedThrowingContinuation { continuation in
-            Task.detached(priority: .utility) {
-                var cStrings = arguments.map { strdup($0) }
-                defer {
-                    for pointer in cStrings {
-                        free(pointer)
-                    }
+            DispatchQueue.global(qos: .utility).async {
+                var argv = arguments.map {
+                    UnsafeMutablePointer(mutating: ($0 as NSString).utf8String)
                 }
-
-                var argv = cStrings.map { UnsafeMutablePointer<CChar>?($0) }
-                let returnCode = ffmpeg_execute(Int32(argv.count), &argv)
+                let returnCode = ffmpeg_execute(Int32(arguments.count), &argv)
                 if returnCode == 0 {
                     continuation.resume()
                     return
