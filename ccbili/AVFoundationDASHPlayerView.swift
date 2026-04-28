@@ -79,7 +79,12 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
             configureAudioSession()
 
             if (source.quality ?? 0) > 80 {
-                await playRemuxedFallback(source: source, audioURL: audioURL)
+                do {
+                    try await playHLSManifest(source: source)
+                } catch {
+                    print("DASH HLS load failed: \(error.localizedDescription)")
+                    await playRemuxedFallback(source: source, audioURL: audioURL)
+                }
                 return
             }
 
@@ -93,6 +98,17 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
             } catch {
                 print("AVFoundation DASH load failed: \(error.localizedDescription)")
                 await playRemuxedFallback(source: source, audioURL: audioURL)
+            }
+        }
+
+        private func playHLSManifest(source: PlayableVideoSource) async throws {
+            let manifestURL = try DashHLSManifestService().makeManifest(for: source)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                let item = AVPlayerItem(url: manifestURL)
+                item.preferredForwardBufferDuration = 2
+                self.player.replaceCurrentItem(with: item)
+                self.player.play()
             }
         }
 

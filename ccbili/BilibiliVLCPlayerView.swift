@@ -103,7 +103,7 @@ struct BilibiliVLCPlayerView: View {
     private var videoSurface: some View {
         Group {
             if currentSource.isDASHSeparated {
-                MPVPlayerView(
+                AVFoundationDASHPlayerView(
                     source: currentSource,
                     commandCenter: commandCenter
                 )

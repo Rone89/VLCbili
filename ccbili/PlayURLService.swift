@@ -13,6 +13,15 @@ struct PlayableVideoSource: Equatable {
     let url: URL
     let audioURL: URL?
     let isDASHSeparated: Bool
+    let duration: TimeInterval?
+    let videoInitRange: String?
+    let audioInitRange: String?
+    let bandwidth: Int?
+    let width: Int?
+    let height: Int?
+    let frameRate: String?
+    let videoCodec: String?
+    let audioCodec: String?
     let headers: [String: String]
     let quality: Int?
     let qualityDescription: String?
@@ -130,11 +139,20 @@ struct PlayURLService {
                 url: videoURL,
                 audioURL: audioURL,
                 isDASHSeparated: true,
+                duration: data.duration.map { TimeInterval($0) / 1000 },
+                videoInitRange: video.segmentBase?.initialization,
+                audioInitRange: audio.segmentBase?.initialization,
+                bandwidth: video.bandwidth,
+                width: video.width,
+                height: video.height,
+                frameRate: video.frameRate,
+                videoCodec: video.codecs,
+                audioCodec: audio.codecs,
                 headers: headers,
                 quality: selectedQuality,
                 qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
                 availableQualities: qualityOptions(from: data),
-                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH/mpv-stream-v2", headers: headers),
+                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH-to-HLS", headers: headers),
                 bvid: bvid,
                 cid: cid
             )
@@ -148,6 +166,15 @@ struct PlayURLService {
             url: videoURL,
             audioURL: nil,
             isDASHSeparated: false,
+            duration: data.duration.map { TimeInterval($0) / 1000 },
+            videoInitRange: video.segmentBase?.initialization,
+            audioInitRange: nil,
+            bandwidth: video.bandwidth,
+            width: video.width,
+            height: video.height,
+            frameRate: video.frameRate,
+            videoCodec: video.codecs,
+            audioCodec: nil,
             headers: headers,
             quality: selectedQuality,
             qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
@@ -180,6 +207,15 @@ struct PlayURLService {
                 url: durlURL,
                 audioURL: nil,
                 isDASHSeparated: false,
+                duration: data.duration.map { TimeInterval($0) / 1000 },
+                videoInitRange: nil,
+                audioInitRange: nil,
+                bandwidth: nil,
+                width: nil,
+                height: nil,
+                frameRate: nil,
+                videoCodec: nil,
+                audioCodec: nil,
                 headers: headers,
                 quality: data.quality,
                 qualityDescription: qualityText(from: data),
@@ -217,6 +253,15 @@ struct PlayURLService {
                 url: source.url,
                 audioURL: source.audioURL,
                 isDASHSeparated: source.isDASHSeparated,
+                duration: source.duration,
+                videoInitRange: source.videoInitRange,
+                audioInitRange: source.audioInitRange,
+                bandwidth: source.bandwidth,
+                width: source.width,
+                height: source.height,
+                frameRate: source.frameRate,
+                videoCodec: source.videoCodec,
+                audioCodec: source.audioCodec,
                 headers: source.headers,
                 quality: source.quality,
                 qualityDescription: source.qualityDescription,
