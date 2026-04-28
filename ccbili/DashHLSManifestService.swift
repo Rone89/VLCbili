@@ -31,15 +31,18 @@ struct DashHLSManifestService {
         let audioPlaylistURL = directory.appendingPathComponent("audio.m3u8")
         let masterURL = directory.appendingPathComponent("master.m3u8")
 
+        let proxiedVideoURL = try LocalHLSProxyServer.shared.register(mediaURL: source.url, headers: source.headers)
+        let proxiedAudioURL = try LocalHLSProxyServer.shared.register(mediaURL: audioURL, headers: source.headers)
+
         try mediaPlaylist(
-            mediaURL: source.url,
+            mediaURL: proxiedVideoURL,
             initRange: videoInitRange,
             indexRange: videoIndexRange,
             segments: parsedVideoSegments
         ).write(to: videoPlaylistURL, atomically: true, encoding: .utf8)
 
         try mediaPlaylist(
-            mediaURL: audioURL,
+            mediaURL: proxiedAudioURL,
             initRange: audioInitRange,
             indexRange: audioIndexRange,
             segments: parsedAudioSegments
@@ -101,7 +104,7 @@ struct DashHLSManifestService {
         indexRange: ByteRange,
         segments: [HLSSegment]
     ) -> String {
-        let escapedURL = hlsResourceURL(from: mediaURL).absoluteString.replacingOccurrences(of: "\"", with: "%22")
+        let escapedURL = mediaURL.absoluteString.replacingOccurrences(of: "\"", with: "%22")
         let targetDuration = max(1, Int(ceil(segments.map(\.duration).max() ?? 1)))
         var lines = [
             "#EXTM3U",
@@ -165,14 +168,6 @@ struct DashHLSManifestService {
         return String(format: "%.3f", doubleValue)
     }
 
-    private func hlsResourceURL(from url: URL) -> URL {
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme == "https" else {
-            return url
-        }
-        components.scheme = "ccbili-dash"
-        return components.url ?? url
-    }
 }
 
 private struct ByteRange {
