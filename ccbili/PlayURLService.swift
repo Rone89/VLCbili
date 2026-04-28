@@ -46,7 +46,7 @@ struct PlayURLService {
             isLoggedIn = cookieHeader.contains("SESSDATA=")
         }
 
-        if quality <= 80 {
+        if quality < 80 {
             if let durlSource = try await fetchDURLSource(
                 bvid: bvid,
                 cid: cid,

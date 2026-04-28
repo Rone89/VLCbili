@@ -77,6 +77,11 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
         private func loadAndPlay(source: PlayableVideoSource) async {
             guard let audioURL = source.audioURL else { return }
 
+            if (source.quality ?? 0) > 80 {
+                await playRemuxedFallback(source: source, audioURL: audioURL)
+                return
+            }
+
             do {
                 let item = try await makePlayerItem(videoURL: source.url, audioURL: audioURL, headers: source.headers)
                 guard !Task.isCancelled else { return }
@@ -86,6 +91,29 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                 }
             } catch {
                 print("AVFoundation DASH load failed: \(error.localizedDescription)")
+                await playRemuxedFallback(source: source, audioURL: audioURL)
+            }
+        }
+
+        private func playRemuxedFallback(source: PlayableVideoSource, audioURL: URL) async {
+            do {
+                let mergedURL = try await DashRemuxService().remuxToMP4(
+                    videoURL: source.url,
+                    audioURL: audioURL,
+                    headers: source.headers,
+                    bvid: source.bvid,
+                    cid: source.cid,
+                    quality: source.quality ?? 0
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    let item = AVPlayerItem(url: mergedURL)
+                    item.preferredForwardBufferDuration = 4
+                    self.player.replaceCurrentItem(with: item)
+                    self.player.play()
+                }
+            } catch {
+                print("DASH remux fallback failed: \(error.localizedDescription)")
             }
         }
 
