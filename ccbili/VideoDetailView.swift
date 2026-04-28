@@ -40,12 +40,10 @@ struct VideoDetailView: View {
         GeometryReader { proxy in
             let contentWidth = max(proxy.size.width - pageHorizontalInset * 2, 0)
             let playerHeight = contentWidth * 9 / 16
-            let fullscreenPlayerWidth = proxy.size.height
-            let fullscreenPlayerHeight = proxy.size.width
-            let displayedPlayerWidth = isVideoFullscreen ? fullscreenPlayerWidth : contentWidth
-            let displayedPlayerHeight = isVideoFullscreen ? fullscreenPlayerHeight : playerHeight
-            let playerOffsetX = isVideoFullscreen ? (proxy.size.width - fullscreenPlayerWidth) / 2 : pageHorizontalInset
-            let playerOffsetY = isVideoFullscreen ? (proxy.size.height - fullscreenPlayerHeight) / 2 : (isVideoPlaying ? 0 : playerScrollOffset)
+            let displayedPlayerWidth = isVideoFullscreen ? proxy.size.width : contentWidth
+            let displayedPlayerHeight = isVideoFullscreen ? proxy.size.height : playerHeight
+            let playerOffsetX = isVideoFullscreen ? 0 : pageHorizontalInset
+            let playerOffsetY = isVideoFullscreen ? 0 : (isVideoPlaying ? proxy.safeAreaInsets.top : playerScrollOffset)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -98,7 +96,6 @@ struct VideoDetailView: View {
                 playerCardSection(height: displayedPlayerHeight)
                     .frame(width: displayedPlayerWidth, height: displayedPlayerHeight)
                     .clipShape(RoundedRectangle(cornerRadius: isVideoFullscreen ? 0 : detailCardCornerRadius, style: .continuous))
-                    .rotationEffect(isVideoFullscreen ? .degrees(90) : .zero)
                     .shadow(color: .black.opacity(isVideoPlaying && !isVideoFullscreen ? 0.16 : 0), radius: 16, x: 0, y: 8)
                     .offset(x: playerOffsetX, y: playerOffsetY)
                     .zIndex(10)
@@ -107,10 +104,20 @@ struct VideoDetailView: View {
             .animation(.easeInOut(duration: 0.25), value: isVideoFullscreen)
         }
         .statusBarHidden(isVideoFullscreen)
+        .toolbar(isVideoFullscreen ? .hidden : .visible, for: .navigationBar)
         .navigationTitle("视频详情")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            AppOrientationController.lock(.portrait)
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            AppOrientationController.lock(.allButUpsideDown)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            let orientation = UIDevice.current.orientation
+            if orientation == .landscapeLeft || orientation == .landscapeRight {
+                isVideoFullscreen = true
+            } else if orientation == .portrait || orientation == .portraitUpsideDown {
+                isVideoFullscreen = false
+            }
         }
         .task {
             favoriteViewModel.load(videoID: viewModel.playbackItem.id)
@@ -139,6 +146,7 @@ struct VideoDetailView: View {
             }
         }
         .onDisappear {
+            isVideoFullscreen = false
             configurePlayer(for: nil)
             AppOrientationController.lock(.portrait)
         }
@@ -183,7 +191,7 @@ struct VideoDetailView: View {
                     isVideoPlaying = isPlaying
                 },
                 onFullscreenRequest: {
-                    isVideoFullscreen.toggle()
+                    toggleVideoFullscreen()
                 }
             )
                 .frame(maxWidth: .infinity)
@@ -997,6 +1005,14 @@ private struct PlayerOffsetPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+
+    private func toggleVideoFullscreen() {
+        let shouldEnterFullscreen = !isVideoFullscreen
+        withAnimation(.easeInOut(duration: 0.25)) {
+            isVideoFullscreen = shouldEnterFullscreen
+        }
+        AppOrientationController.lock(shouldEnterFullscreen ? .landscape : .portrait)
     }
 }
 

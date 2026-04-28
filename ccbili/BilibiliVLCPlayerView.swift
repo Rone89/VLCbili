@@ -224,17 +224,6 @@ struct BilibiliVLCPlayerView: View {
 
     private var controlsOverlay: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    .black.opacity(0.48),
-                    .clear,
-                    .black.opacity(0.74)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .allowsHitTesting(false)
-
             VStack(spacing: 0) {
                 topControls
 
@@ -260,7 +249,7 @@ struct BilibiliVLCPlayerView: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 34, height: 34)
-                    .background(.white.opacity(0.16), in: Circle())
+                    .background(.ultraThinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
 
@@ -284,7 +273,7 @@ struct BilibiliVLCPlayerView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(width: 34, height: 34)
-                        .background(.white.opacity(0.16), in: Circle())
+                        .background(.ultraThinMaterial, in: Circle())
                 }
                 .buttonStyle(.plain)
             }
@@ -344,7 +333,7 @@ struct BilibiliVLCPlayerView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(.white.opacity(0.16), in: Capsule())
+            .background(.ultraThinMaterial, in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(isSwitchingQuality)
@@ -396,6 +385,9 @@ struct BilibiliVLCPlayerView: View {
             }
         }
         .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.horizontal, 10)
         .padding(.bottom, 10)
     }
 
