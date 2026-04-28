@@ -1,11 +1,12 @@
 ﻿## 本版本修复
 
-- DASH→HLS 改为本地 HTTP 代理方案：AVPlayer 播放 `127.0.0.1` 的 HLS 分片地址。
-- 新增 `LocalHLSProxyServer`，使用 `Network.framework` 在 App 内启动极简本地服务，按分片请求转发到 B 站 DASH URL。
-- 本地代理会补齐 Cookie/Referer/User-Agent/Range，避免 AVPlayer 直接请求远程 DASH 分片时丢请求头。
-- HLS 清单继续使用 sidx 解析后的 `EXT-X-BYTERANGE` 分片，但媒体 URL 改成本地代理路由。
-- 诊断文本标记为 `DASH-to-HLS-local`。
+- 新增 `DASHAssetLoader`：基于 `AVMutableComposition` 将远程 Video Track 与 Audio Track 合成为一个 `AVPlayerItem`。
+- 1080P+/1080P60/4K 优先走 `DASH-AVComposition` 路径，符合 JKVideo 的核心思路：先识别 DASH 音画分离，再交给播放器统一播放。
+- `DASHAssetLoader.createPlayerItem(videoURL:audioURL:headers:)` 会异步加载 video/audio tracks，确保 tracks 就绪后再插入 composition。
+- 注入 Referer/User-Agent/Cookie/Accept 等请求头到两个 `AVURLAsset`，降低 B 站 CDN 403 风险。
+- 合成时保留原视频 `preferredTransform` 和 `naturalSize`，避免方向错误。
+- 如果 AVComposition 合成失败，仍保留本地合流兜底，避免高画质完全不可播。
 
-## 说明
+## 原理说明
 
-这是 AVPlayer + DASH→HLS 第四版验证：重点测试 1080P+/4K 是否能出画、有声，以及加载速度是否改善。
+Bilibili 1080P+ 通常是 DASH 音画分离：视频 URL 只有画面，音频 URL 只有声音。单 URL AVPlayer 无法自动合并两条远程流，所以会出现有画无声或解析失败。本版本通过 `AVMutableComposition` 把远程视频轨和音频轨合成一个逻辑媒体项，再交给 AVPlayer 播放。

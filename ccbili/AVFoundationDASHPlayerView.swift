@@ -80,9 +80,18 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
 
             if (source.quality ?? 0) > 80 {
                 do {
-                    try await playHLSManifest(source: source)
+                    let item = try await DASHAssetLoader().createPlayerItem(
+                        videoURL: source.url,
+                        audioURL: audioURL,
+                        headers: source.headers
+                    )
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        self.player.replaceCurrentItem(with: item)
+                        self.player.play()
+                    }
                 } catch {
-                    print("DASH HLS load failed: \(error.localizedDescription)")
+                    print("DASH composition load failed: \(error.localizedDescription)")
                     await playRemuxedFallback(source: source, audioURL: audioURL)
                 }
                 return
