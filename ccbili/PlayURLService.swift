@@ -43,20 +43,18 @@ struct PlayURLService {
             headers["Cookie"] = cookieHeader
         }
 
-        if quality <= 80 {
-            if let durlSource = try await fetchDURLSource(
+        if let durlSource = try await fetchDURLSource(
+            bvid: bvid,
+            cid: cid,
+            preferredQuality: quality,
+            headers: headers
+        ), quality <= 80 || (durlSource.quality ?? 0) >= quality {
+            return await sourceByMergingDASHQualities(
+                into: durlSource,
                 bvid: bvid,
                 cid: cid,
-                preferredQuality: quality,
                 headers: headers
-            ) {
-                return await sourceByMergingDASHQualities(
-                    into: durlSource,
-                    bvid: bvid,
-                    cid: cid,
-                    headers: headers
-                )
-            }
+            )
         }
 
         if let dashSource = try await fetchDASHSource(
@@ -478,8 +476,9 @@ struct PlayURLService {
         let resolution = selectedVideo.map { video in
             "\(video.width ?? 0)x\(video.height ?? 0)@\(video.frameRate ?? "?")"
         } ?? "durl"
+        let durlCount = data.durl?.count ?? 0
 
-        return "\(sourceType) selected=\(selected) res=\(resolution) accept=[\(accept)] dash=[\(dashQualities)]"
+        return "\(sourceType) selected=\(selected) res=\(resolution) durl=\(durlCount) accept=[\(accept)] dash=[\(dashQualities)]"
     }
 
     private func qualityText(from data: PlayURLDataDTO) -> String? {
