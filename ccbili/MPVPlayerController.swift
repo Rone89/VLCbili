@@ -13,7 +13,7 @@ final class MPVPlayerController {
         mpv = mpv_create()
         guard let mpv else { return }
         mpv_request_log_messages(mpv, "warn")
-        setOption("vo", value: "libmpv")
+        setOption("vo", value: "gpu")
         setOption("keepaspect", value: "yes")
         setOption("input-default-bindings", value: "no")
         setOption("input-vo-keyboard", value: "no")
@@ -124,8 +124,8 @@ final class MPVPlayerController {
                 let current = self.doubleProperty("time-pos") ?? 0
                 let duration = self.doubleProperty("duration") ?? 0
                 let paused = self.boolProperty("pause") ?? false
-                await MainActor.run {
-                    self.timeUpdateHandler?(current, duration, !paused)
+                await MainActor.run { [weak self] in
+                    self?.timeUpdateHandler?(current, duration, !paused)
                 }
             }
         }
