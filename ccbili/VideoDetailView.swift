@@ -22,6 +22,8 @@ struct VideoDetailView: View {
     @State private var selectedTab: DetailTab = .intro
     @State private var commentSortMode: CommentSortMode = .hot
     @State private var playerScrollOffset: CGFloat = 0
+    @State private var isVideoPlaying = false
+    @State private var isVideoFullscreen = false
 
     private let biliPink = Color(red: 251 / 255, green: 114 / 255, blue: 153 / 255)
     private let replyService = ReplyService()
@@ -38,9 +40,12 @@ struct VideoDetailView: View {
         GeometryReader { proxy in
             let contentWidth = max(proxy.size.width - pageHorizontalInset * 2, 0)
             let playerHeight = contentWidth * 9 / 16
-            let isMiniPlayer = playerScrollOffset < -(playerHeight * 0.72)
-            let floatingPlayerWidth = isMiniPlayer ? min(proxy.size.width * 0.52, 230) : contentWidth
-            let floatingPlayerHeight = floatingPlayerWidth * 9 / 16
+            let fullscreenPlayerWidth = proxy.size.height
+            let fullscreenPlayerHeight = proxy.size.width
+            let displayedPlayerWidth = isVideoFullscreen ? fullscreenPlayerWidth : contentWidth
+            let displayedPlayerHeight = isVideoFullscreen ? fullscreenPlayerHeight : playerHeight
+            let playerOffsetX = isVideoFullscreen ? (proxy.size.width - fullscreenPlayerWidth) / 2 : pageHorizontalInset
+            let playerOffsetY = isVideoFullscreen ? (proxy.size.height - fullscreenPlayerHeight) / 2 : (isVideoPlaying ? 0 : playerScrollOffset)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -84,17 +89,24 @@ struct VideoDetailView: View {
             }
             .background(Color(.systemGroupedBackground))
             .overlay(alignment: .topLeading) {
-                playerCardSection(height: floatingPlayerHeight)
-                    .frame(width: floatingPlayerWidth, height: floatingPlayerHeight)
-                    .shadow(color: .black.opacity(isMiniPlayer ? 0.18 : 0), radius: 18, x: 0, y: 8)
-                    .offset(
-                        x: isMiniPlayer ? proxy.size.width - floatingPlayerWidth - pageHorizontalInset : pageHorizontalInset,
-                        y: 12
-                    )
-                    .animation(.spring(response: 0.32, dampingFraction: 0.86), value: isMiniPlayer)
+                if isVideoFullscreen {
+                    Color.black
+                        .ignoresSafeArea()
+                        .zIndex(9)
+                }
+
+                playerCardSection(height: displayedPlayerHeight)
+                    .frame(width: displayedPlayerWidth, height: displayedPlayerHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: isVideoFullscreen ? 0 : detailCardCornerRadius, style: .continuous))
+                    .rotationEffect(isVideoFullscreen ? .degrees(90) : .zero)
+                    .shadow(color: .black.opacity(isVideoPlaying && !isVideoFullscreen ? 0.16 : 0), radius: 16, x: 0, y: 8)
+                    .offset(x: playerOffsetX, y: playerOffsetY)
                     .zIndex(10)
             }
+            .animation(.spring(response: 0.32, dampingFraction: 0.88), value: isVideoPlaying)
+            .animation(.easeInOut(duration: 0.25), value: isVideoFullscreen)
         }
+        .statusBarHidden(isVideoFullscreen)
         .navigationTitle("视频详情")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -166,6 +178,12 @@ struct VideoDetailView: View {
                 initialPosition: playbackPosition,
                 onPositionChange: { position in
                     playbackPosition = position
+                },
+                onPlaybackStateChange: { isPlaying in
+                    isVideoPlaying = isPlaying
+                },
+                onFullscreenRequest: {
+                    isVideoFullscreen.toggle()
                 }
             )
                 .frame(maxWidth: .infinity)

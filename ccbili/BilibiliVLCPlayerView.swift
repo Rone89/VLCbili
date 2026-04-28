@@ -19,6 +19,8 @@ struct BilibiliVLCPlayerView: View {
     private let enablesAutoFullscreen: Bool
     private let initialPosition: Double?
     private let onPositionChange: (Double) -> Void
+    private let onPlaybackStateChange: (Bool) -> Void
+    private let onFullscreenRequest: (() -> Void)?
 
     @StateObject private var playbackState = BilibiliVLCPlaybackState()
     @StateObject private var commandCenter = BilibiliVLCCommandCenter()
@@ -45,12 +47,16 @@ struct BilibiliVLCPlayerView: View {
         source: PlayableVideoSource,
         enablesAutoFullscreen: Bool = true,
         initialPosition: Double? = nil,
-        onPositionChange: @escaping (Double) -> Void = { _ in }
+        onPositionChange: @escaping (Double) -> Void = { _ in },
+        onPlaybackStateChange: @escaping (Bool) -> Void = { _ in },
+        onFullscreenRequest: (() -> Void)? = nil
     ) {
         self.source = source
         self.enablesAutoFullscreen = enablesAutoFullscreen
         self.initialPosition = initialPosition
         self.onPositionChange = onPositionChange
+        self.onPlaybackStateChange = onPlaybackStateChange
+        self.onFullscreenRequest = onFullscreenRequest
         _currentSource = State(initialValue: source)
         _pendingSeekPosition = State(initialValue: initialPosition)
     }
@@ -95,6 +101,9 @@ struct BilibiliVLCPlayerView: View {
             if position > 0 || playbackState.isPlaying {
                 didReceiveFirstProgress = true
             }
+        }
+        .onReceive(playbackState.$isPlaying.removeDuplicates()) { isPlaying in
+            onPlaybackStateChange(isPlaying)
         }
         .onChange(of: source) { _, newValue in
             currentSource = newValue
@@ -265,6 +274,20 @@ struct BilibiliVLCPlayerView: View {
             Spacer()
 
             qualityMenu
+
+            if let onFullscreenRequest {
+                Button {
+                    onFullscreenRequest()
+                    showControlsTemporarily()
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(.white.opacity(0.16), in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 10)
