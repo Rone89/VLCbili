@@ -33,6 +33,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
         private weak var commandCenter: BilibiliVLCCommandCenter?
         private var currentSource: PlayableVideoSource?
         private var loadTask: Task<Void, Never>?
+        private var statusObserver: NSKeyValueObservation?
 
         init(commandCenter: BilibiliVLCCommandCenter) {
             self.commandCenter = commandCenter
@@ -59,6 +60,8 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
             guard source != currentSource else { return }
             currentSource = source
             loadTask?.cancel()
+            statusObserver?.invalidate()
+            statusObserver = nil
             player.pause()
             player.replaceCurrentItem(with: nil)
 
@@ -69,6 +72,8 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
 
         func stop() {
             loadTask?.cancel()
+            statusObserver?.invalidate()
+            statusObserver = nil
             player.pause()
             player.replaceCurrentItem(with: nil)
             currentSource = nil
@@ -86,6 +91,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                     await MainActor.run {
                         let item = AVPlayerItem(url: manifestURL)
                         item.preferredForwardBufferDuration = 2
+                        self.observe(item: item)
                         self.player.replaceCurrentItem(with: item)
                         self.player.play()
                     }
@@ -104,6 +110,22 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                 }
             } catch {
                 print("AVFoundation DASH load failed: \(error.localizedDescription)")
+            }
+        }
+
+        private func observe(item: AVPlayerItem) {
+            statusObserver?.invalidate()
+            statusObserver = item.observe(\.status, options: [.new]) { item, _ in
+                switch item.status {
+                case .readyToPlay:
+                    HLSPlaybackDiagnostics.shared.recordPlayerStatus("ready")
+                case .failed:
+                    HLSPlaybackDiagnostics.shared.recordPlayerStatus("failed:\(item.error?.localizedDescription ?? "unknown")")
+                case .unknown:
+                    HLSPlaybackDiagnostics.shared.recordPlayerStatus("unknown")
+                @unknown default:
+                    HLSPlaybackDiagnostics.shared.recordPlayerStatus("other")
+                }
             }
         }
 

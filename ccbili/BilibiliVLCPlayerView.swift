@@ -201,7 +201,7 @@ struct BilibiliVLCPlayerView: View {
         Text(text)
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundStyle(.yellow.opacity(0.95))
-            .lineLimit(3)
+            .lineLimit(8)
             .minimumScaleFactor(0.65)
             .multilineTextAlignment(.leading)
             .truncationMode(.tail)
@@ -215,7 +215,7 @@ struct BilibiliVLCPlayerView: View {
 
     private func debugText(base: String) -> String {
         guard base.contains("DASH-to-HLS") else { return base }
-        return "\(base) \(hlsDiagnosticsText)"
+        return "\(base)\n\(hlsDiagnosticsText)"
     }
 
     private var qualityMenu: some View {

@@ -1,11 +1,10 @@
 ﻿## 本版本修复
 
-- 新增 DASH→HLS 诊断状态，用于定位 1080P+/4K 仍黑屏的问题。
-- HLS 清单生成时记录 video/audio sidx 分片数量、target duration、video/audio index_range。
-- 本地 HLS 代理记录 AVPlayer 实际请求次数、HTTP 状态码、请求 Range、响应 Content-Range、返回字节数。
-- 播放诊断打开时，如果当前路径是 `DASH-to-HLS-local`，会动态追加 `manifest=... proxy=...` 信息。
-- 每次加载高画质 HLS 前会重置诊断，避免旧请求状态干扰判断。
+- 为本地 HLS 代理补充 `NSAllowsLocalNetworking`，避免 AVPlayer 访问 `127.0.0.1` HLS 分片被 ATS/本地网络策略拦截。
+- 播放诊断从 3 行扩展到 8 行，并把 HLS 诊断换行显示，避免 `manifest/proxy` 信息被截断。
+- 增加 AVPlayerItem 状态诊断：显示 `player=ready/failed/unknown` 以及失败原因。
+- 保留 HLS manifest 与 proxy 请求诊断：`manifest=v.../a...`、`proxy#... status req/res bytes`。
 
 ## 说明
 
-请打开“我的 → 播放诊断”，重新播放 1080P+/4K 后把完整黄色诊断文本发我。重点看是否出现 `proxy#`：如果没有，说明 AVPlayer 没请求本地分片；如果有 403/416/502，就能继续针对 Range 或请求头修。
+请安装后重新测试 1080P+/4K，并把完整黄色诊断发我。重点看是否有 `proxy#`，以及 `player=` 是 ready、failed 还是 unknown。

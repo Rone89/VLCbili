@@ -40,6 +40,12 @@ final class HLSPlaybackDiagnostics {
         lock.unlock()
     }
 
+    func recordPlayerStatus(_ status: String) {
+        lock.lock()
+        proxyText = "player=\(status) \(proxyText)"
+        lock.unlock()
+    }
+
     var summary: String {
         lock.lock()
         let value = "\(manifestText) \(proxyText)"
