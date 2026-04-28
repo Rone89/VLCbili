@@ -109,6 +109,7 @@ struct BilibiliVLCPlayerView: View {
             if currentSource.isDASHSeparated {
                 AVFoundationDASHPlayerView(
                     source: currentSource,
+                    playbackState: playbackState,
                     commandCenter: commandCenter
                 )
             } else {

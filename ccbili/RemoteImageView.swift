@@ -75,14 +75,8 @@ struct RemoteImageView<Placeholder: View, FailureView: View>: View {
 
         let session = URLSession(configuration: configuration)
 
-        var request = URLRequest(url: url)
-        request.setValue(AppConfig.defaultUserAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
-        request.cachePolicy = .returnCacheDataElseLoad
-        request.setValue("image/webp,image/apng,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
-
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await loadImageData(originalURL: url, session: session)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 errorText = "响应无效"
@@ -116,5 +110,68 @@ struct RemoteImageView<Placeholder: View, FailureView: View>: View {
             errorText = error.localizedDescription
             phase = .failure
         }
+    }
+
+    private func loadImageData(originalURL: URL, session: URLSession) async throws -> (Data, URLResponse) {
+        var lastError: Error?
+        for candidateURL in imageCandidateURLs(from: originalURL) {
+            do {
+                var request = URLRequest(url: candidateURL)
+                request.setValue(AppConfig.defaultUserAgent, forHTTPHeaderField: "User-Agent")
+                request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
+                request.cachePolicy = .returnCacheDataElseLoad
+                request.setValue("image/avif,image/webp,image/apng,image/jpeg,image/png,image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+
+                let (data, response) = try await session.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse,
+                   !(200...299).contains(httpResponse.statusCode) {
+                    lastError = APIError.invalidStatusCode(httpResponse.statusCode)
+                    continue
+                }
+                if UIImage(data: data) != nil {
+                    return (data, response)
+                }
+                lastError = APIError.serverMessage("图片解码失败")
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? APIError.invalidResponse
+    }
+
+    private func imageCandidateURLs(from url: URL) -> [URL] {
+        var candidates = [url]
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return candidates
+        }
+
+        let originalPath = components.path
+        let strippedPath = originalPath.split(separator: "@", maxSplits: 1).first.map(String.init) ?? originalPath
+        if strippedPath != originalPath {
+            components.path = strippedPath
+            if let strippedURL = components.url {
+                candidates.append(strippedURL)
+            }
+        }
+
+        let basePath = components.path
+        for replacement in [".jpg", ".png", ".webp"] where !basePath.hasSuffix(replacement) {
+            var replacementComponents = components
+            replacementComponents.path = basePath.replacingOccurrences(
+                of: #"\.(webp|avif|jpg|jpeg|png)$"#,
+                with: replacement,
+                options: .regularExpression
+            )
+            if let replacementURL = replacementComponents.url {
+                candidates.append(replacementURL)
+            }
+        }
+
+        var unique = [URL]()
+        var seen = Set<String>()
+        for candidate in candidates where seen.insert(candidate.absoluteString).inserted {
+            unique.append(candidate)
+        }
+        return unique
     }
 }

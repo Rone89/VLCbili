@@ -4,10 +4,11 @@ import UIKit
 
 struct AVFoundationDASHPlayerView: UIViewRepresentable {
     let source: PlayableVideoSource
+    let playbackState: BilibiliVLCPlaybackState
     let commandCenter: BilibiliVLCCommandCenter
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(commandCenter: commandCenter)
+        Coordinator(playbackState: playbackState, commandCenter: commandCenter)
     }
 
     func makeUIView(context: Context) -> PlayerContainerView {
@@ -30,24 +31,21 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
     final class Coordinator {
         private let player = AVPlayer()
         private weak var playerLayer: AVPlayerLayer?
+        private weak var playbackState: BilibiliVLCPlaybackState?
         private weak var commandCenter: BilibiliVLCCommandCenter?
         private var currentSource: PlayableVideoSource?
         private var loadTask: Task<Void, Never>?
         private var statusObserver: NSKeyValueObservation?
+        private var timeObserver: Any?
 
-        init(commandCenter: BilibiliVLCCommandCenter) {
+        init(playbackState: BilibiliVLCPlaybackState, commandCenter: BilibiliVLCCommandCenter) {
+            self.playbackState = playbackState
             self.commandCenter = commandCenter
-            self.commandCenter?.togglePlayHandler = { [weak self] in
-                guard let self else { return }
-                if self.player.timeControlStatus == .playing {
-                    self.player.pause()
-                } else {
-                    self.player.play()
-                }
-            }
-            self.commandCenter?.stopHandler = { [weak self] in
-                self?.stop()
-            }
+            bindCommands()
+        }
+
+        deinit {
+            removeTimeObserver()
         }
 
         func attach(to layer: AVPlayerLayer) {
@@ -62,6 +60,8 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
             loadTask?.cancel()
             statusObserver?.invalidate()
             statusObserver = nil
+            removeTimeObserver()
+            playbackState?.resetForNewMedia()
             player.pause()
             player.replaceCurrentItem(with: nil)
 
@@ -74,9 +74,36 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
             loadTask?.cancel()
             statusObserver?.invalidate()
             statusObserver = nil
+            removeTimeObserver()
             player.pause()
             player.replaceCurrentItem(with: nil)
             currentSource = nil
+        }
+
+        private func bindCommands() {
+            commandCenter?.togglePlayHandler = { [weak self] in
+                guard let self else { return }
+                if self.player.timeControlStatus == .playing {
+                    self.player.pause()
+                } else {
+                    self.player.play()
+                }
+                self.updatePlaybackState()
+            }
+
+            commandCenter?.seekHandler = { [weak self] position in
+                guard let self, let item = self.player.currentItem else { return }
+                let duration = item.duration
+                guard duration.isValid, duration.isNumeric, duration.seconds > 0 else { return }
+                let target = CMTime(seconds: duration.seconds * min(max(position, 0), 1), preferredTimescale: 600)
+                self.player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+                    self?.updatePlaybackState()
+                }
+            }
+
+            commandCenter?.stopHandler = { [weak self] in
+                self?.stop()
+            }
         }
 
         private func loadAndPlay(source: PlayableVideoSource) async {
@@ -90,9 +117,11 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
                         let item = AVPlayerItem(url: manifestURL)
-                        item.preferredForwardBufferDuration = 2
+                        item.preferredForwardBufferDuration = 0.8
+                        self.player.automaticallyWaitsToMinimizeStalling = false
                         self.observe(item: item)
                         self.player.replaceCurrentItem(with: item)
+                        self.addTimeObserver()
                         self.player.play()
                     }
                 } catch {
@@ -105,7 +134,9 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                 let item = try await makePlayerItem(videoURL: source.url, audioURL: audioURL, headers: source.headers)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
+                    self.player.automaticallyWaitsToMinimizeStalling = false
                     self.player.replaceCurrentItem(with: item)
+                    self.addTimeObserver()
                     self.player.play()
                 }
             } catch {
@@ -119,6 +150,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                 switch item.status {
                 case .readyToPlay:
                     HLSPlaybackDiagnostics.shared.recordPlayerStatus("ready")
+                    self.updatePlaybackState()
                 case .failed:
                     HLSPlaybackDiagnostics.shared.recordPlayerStatus("failed:\(item.error?.localizedDescription ?? "unknown")")
                 case .unknown:
@@ -127,6 +159,51 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                     HLSPlaybackDiagnostics.shared.recordPlayerStatus("other")
                 }
             }
+        }
+
+        private func addTimeObserver() {
+            removeTimeObserver()
+            timeObserver = player.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+                queue: .main
+            ) { [weak self] _ in
+                self?.updatePlaybackState()
+            }
+        }
+
+        private func removeTimeObserver() {
+            if let timeObserver {
+                player.removeTimeObserver(timeObserver)
+                self.timeObserver = nil
+            }
+        }
+
+        private func updatePlaybackState() {
+            guard let playbackState else { return }
+            let current = player.currentTime()
+            let duration = player.currentItem?.duration ?? .invalid
+            let isPlaying = player.timeControlStatus == .playing
+            DispatchQueue.main.async {
+                playbackState.isPlaying = isPlaying
+                guard duration.isValid, duration.isNumeric, duration.seconds > 0 else {
+                    playbackState.elapsedText = Self.timeText(current.seconds)
+                    playbackState.durationText = "00:00"
+                    return
+                }
+                if !playbackState.isScrubbing {
+                    playbackState.position = min(max(current.seconds / duration.seconds, 0), 1)
+                }
+                playbackState.elapsedText = Self.timeText(current.seconds)
+                playbackState.durationText = Self.timeText(duration.seconds)
+            }
+        }
+
+        private static func timeText(_ seconds: Double) -> String {
+            guard seconds.isFinite, seconds >= 0 else { return "00:00" }
+            let totalSeconds = Int(seconds.rounded(.down))
+            let minutes = totalSeconds / 60
+            let remainingSeconds = totalSeconds % 60
+            return String(format: "%02d:%02d", minutes, remainingSeconds)
         }
 
         private func configureAudioSession() {
