@@ -39,6 +39,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
         private var statusObserver: NSKeyValueObservation?
         private var timeObserver: Any?
         private var shouldAutoplay = true
+        private var isUsingExternalPlayerLayer = false
 
         init(playbackState: BilibiliVLCPlaybackState, commandCenter: BilibiliVLCCommandCenter) {
             self.playbackState = playbackState
@@ -52,6 +53,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
 
         func attach(to layer: AVPlayerLayer) {
             inlinePlayerLayer = layer
+            guard !isUsingExternalPlayerLayer else { return }
             playerLayer = layer
             layer.videoGravity = .resizeAspect
             layer.player = player
@@ -134,11 +136,13 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
             commandCenter?.attachPlayerLayerHandler = { [weak self] layer in
                 guard let self else { return }
                 if let layer {
+                    self.isUsingExternalPlayerLayer = true
                     self.playerLayer?.player = nil
                     self.playerLayer = layer
                     layer.videoGravity = .resizeAspect
                     layer.player = self.player
                 } else if let inlinePlayerLayer = self.inlinePlayerLayer {
+                    self.isUsingExternalPlayerLayer = false
                     self.playerLayer?.player = nil
                     self.playerLayer = inlinePlayerLayer
                     inlinePlayerLayer.videoGravity = .resizeAspect

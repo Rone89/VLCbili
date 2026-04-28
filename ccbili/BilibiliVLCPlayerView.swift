@@ -38,6 +38,7 @@ struct BilibiliVLCPlayerView: View {
     @State private var seekResumePlayback = false
     @State private var hasAppeared = false
     @State private var shouldResumeAfterVisibilityReturn = false
+    @State private var isPlayerLayerDetachedForFullscreen = false
     private let diagnosticsTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(
@@ -67,6 +68,9 @@ struct BilibiliVLCPlayerView: View {
                     playbackState: playbackState,
                     commandCenter: commandCenter,
                     debugText: isPlaybackDiagnosticsEnabled ? currentSource.debugDescription.map(debugText(base:)) : nil,
+                    onLayerDetachedChange: { isDetached in
+                        isPlayerLayerDetachedForFullscreen = isDetached
+                    },
                     onDismiss: {
                         isFullscreenPresented = false
                     }
@@ -128,9 +132,12 @@ struct BilibiliVLCPlayerView: View {
 
     private var playerSurface: some View {
         ZStack {
-            videoSurface
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .opacity(isFullscreenPresented ? 0 : 1)
+            if isPlayerLayerDetachedForFullscreen {
+                Color.black
+            } else {
+                videoSurface
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
 
             Color.black.opacity(0.001)
                 .contentShape(Rectangle())
@@ -545,6 +552,7 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
     let playbackState: BilibiliVLCPlaybackState
     let commandCenter: BilibiliVLCCommandCenter
     let debugText: String?
+    let onLayerDetachedChange: (Bool) -> Void
     let onDismiss: () -> Void
 
     func makeUIView(context: Context) -> UIView {
@@ -558,6 +566,7 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
             playbackState: playbackState,
             commandCenter: commandCenter,
             debugText: debugText,
+            onLayerDetachedChange: onLayerDetachedChange,
             onDismiss: onDismiss
         )
     }
@@ -577,6 +586,7 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
         private var window: UIWindow?
         private var hostingController: UIHostingController<FullscreenPlayerOverlay>?
         private let playerLayer = AVPlayerLayer()
+        private var onLayerDetachedChange: ((Bool) -> Void)?
 
         @MainActor
         func update(
@@ -585,15 +595,18 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
             playbackState: BilibiliVLCPlaybackState,
             commandCenter: BilibiliVLCCommandCenter,
             debugText: String?,
+            onLayerDetachedChange: @escaping (Bool) -> Void,
             onDismiss: @escaping () -> Void
         ) {
             self.commandCenter = commandCenter
+            self.onLayerDetachedChange = onLayerDetachedChange
             if isPresented {
                 present(
                     orientation: orientation,
                     playbackState: playbackState,
                     commandCenter: commandCenter,
                     debugText: debugText,
+                    onLayerDetachedChange: onLayerDetachedChange,
                     onDismiss: onDismiss
                 )
             } else {
@@ -607,9 +620,11 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
             playbackState: BilibiliVLCPlaybackState,
             commandCenter: BilibiliVLCCommandCenter,
             debugText: String?,
+            onLayerDetachedChange: @escaping (Bool) -> Void,
             onDismiss: @escaping () -> Void
         ) {
             commandCenter.attachPlayerLayer(playerLayer)
+            onLayerDetachedChange(true)
             let overlay = FullscreenPlayerOverlay(
                 playerLayer: playerLayer,
                 orientation: orientation,
@@ -643,6 +658,7 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
         @MainActor
         func dismiss(commandCenter: BilibiliVLCCommandCenter?) {
             commandCenter?.attachPlayerLayer(nil)
+            onLayerDetachedChange?(false)
             hostingController = nil
             window?.isHidden = true
             window = nil
@@ -822,6 +838,7 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
         private weak var commandCenter: BilibiliVLCCommandCenter?
         private var currentSource: PlayableVideoSource?
         private var timeObserver: Any?
+        private var isUsingExternalPlayerLayer = false
 
         init(playbackState: BilibiliVLCPlaybackState, commandCenter: BilibiliVLCCommandCenter) {
             self.playbackState = playbackState
@@ -835,6 +852,7 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
 
         func attach(to layer: AVPlayerLayer) {
             inlinePlayerLayer = layer
+            guard !isUsingExternalPlayerLayer else { return }
             playerLayer = layer
             layer.videoGravity = .resizeAspect
             layer.player = player
@@ -907,11 +925,13 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
             commandCenter?.attachPlayerLayerHandler = { [weak self] layer in
                 guard let self else { return }
                 if let layer {
+                    self.isUsingExternalPlayerLayer = true
                     self.playerLayer?.player = nil
                     self.playerLayer = layer
                     layer.videoGravity = .resizeAspect
                     layer.player = self.player
                 } else if let inlinePlayerLayer = self.inlinePlayerLayer {
+                    self.isUsingExternalPlayerLayer = false
                     self.playerLayer?.player = nil
                     self.playerLayer = inlinePlayerLayer
                     inlinePlayerLayer.videoGravity = .resizeAspect
