@@ -101,7 +101,7 @@ struct DashHLSManifestService {
         indexRange: ByteRange,
         segments: [HLSSegment]
     ) -> String {
-        let escapedURL = mediaURL.absoluteString.replacingOccurrences(of: "\"", with: "%22")
+        let escapedURL = hlsResourceURL(from: mediaURL).absoluteString.replacingOccurrences(of: "\"", with: "%22")
         let targetDuration = max(1, Int(ceil(segments.map(\.duration).max() ?? 1)))
         var lines = [
             "#EXTM3U",
@@ -163,6 +163,15 @@ struct DashHLSManifestService {
     private func normalizedFrameRate(_ value: String?) -> String? {
         guard let value, let doubleValue = Double(value), doubleValue > 0 else { return nil }
         return String(format: "%.3f", doubleValue)
+    }
+
+    private func hlsResourceURL(from url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme == "https" else {
+            return url
+        }
+        components.scheme = "ccbili-dash"
+        return components.url ?? url
     }
 }
 

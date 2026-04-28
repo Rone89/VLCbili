@@ -33,6 +33,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
         private weak var commandCenter: BilibiliVLCCommandCenter?
         private var currentSource: PlayableVideoSource?
         private var loadTask: Task<Void, Never>?
+        private var hlsResourceLoader: DashHLSResourceLoader?
 
         init(commandCenter: BilibiliVLCCommandCenter) {
             self.commandCenter = commandCenter
@@ -59,6 +60,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
             guard source != currentSource else { return }
             currentSource = source
             loadTask?.cancel()
+            hlsResourceLoader = nil
             player.pause()
             player.replaceCurrentItem(with: nil)
 
@@ -69,6 +71,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
 
         func stop() {
             loadTask?.cancel()
+            hlsResourceLoader = nil
             player.pause()
             player.replaceCurrentItem(with: nil)
             currentSource = nil
@@ -105,7 +108,11 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
             let manifestURL = try await DashHLSManifestService().makeManifest(for: source)
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                let item = AVPlayerItem(url: manifestURL)
+                let asset = AVURLAsset(url: manifestURL)
+                let loader = DashHLSResourceLoader(headers: source.headers)
+                asset.resourceLoader.setDelegate(loader, queue: .main)
+                self.hlsResourceLoader = loader
+                let item = AVPlayerItem(asset: asset)
                 item.preferredForwardBufferDuration = 2
                 self.player.replaceCurrentItem(with: item)
                 self.player.play()
