@@ -21,6 +21,9 @@ final class AuthManager {
         }
 
         do {
+            await BilibiliCookieStore.syncWebCookiesToSharedStorage()
+            BilibiliCookieStore.restoreToSharedStorage()
+
             let url = AppConfig.apiBaseURL.appending(path: "/x/web-interface/nav")
             let response = try await APIClient.shared.get(
                 url: url,
@@ -41,6 +44,8 @@ final class AuthManager {
                 avatarURL = normalizedImageURL(from: data.face)
                 persistLastKnownLoginState()
                 BilibiliCookieStore.persistSharedStorage()
+            } else if allowOfflineFallback, UserDefaults.standard.bool(forKey: "auth.lastKnownLoggedIn") {
+                isLoggedIn = true
             } else {
                 isLoggedIn = false
                 username = nil

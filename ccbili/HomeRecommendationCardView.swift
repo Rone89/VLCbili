@@ -63,14 +63,23 @@ struct HomeRecommendationCardView: View {
                         ProgressView()
                     }
                 },
-                failureView: { _ in
+                failureView: { errorText in
                     ZStack {
                         Rectangle()
                             .fill(Color(.tertiarySystemGroupedBackground))
 
-                        Image(systemName: "photo")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
+                        VStack(spacing: 4) {
+                            Image(systemName: "photo")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+
+                            Text(errorText)
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 6)
+                        }
                     }
                 }
             )

@@ -60,7 +60,9 @@ struct DashHLSManifestService {
             segments: parsedVideoSegments
         )
 
-        return try LocalHLSProxyServer.shared.registerPlaylist(masterPlaylist, name: "master.m3u8")
+        let masterURL = try LocalHLSProxyServer.shared.registerPlaylist(masterPlaylist, name: "master.m3u8")
+        try await LocalHLSProxyServer.shared.waitUntilReady()
+        return masterURL
     }
 
     private func segments(mediaURL: URL, indexRange: ByteRange, headers: [String: String]) async throws -> [HLSSegment] {

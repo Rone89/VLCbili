@@ -194,16 +194,6 @@ private struct WebLoginWebView: UIViewRepresentable {
     }
 }
 
-private extension WKHTTPCookieStore {
-    func allCookies() async -> [HTTPCookie] {
-        await withCheckedContinuation { continuation in
-            getAllCookies { cookies in
-                continuation.resume(returning: cookies)
-            }
-        }
-    }
-}
-
 private extension Notification.Name {
     static let webLoginReloadRequested = Notification.Name("webLoginReloadRequested")
 }

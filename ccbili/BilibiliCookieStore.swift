@@ -14,6 +14,17 @@ enum BilibiliCookieStore {
         persist(cookies: bilibiliCookies(from: HTTPCookieStorage.shared.cookies ?? []))
     }
 
+    static func syncWebCookiesToSharedStorage() async {
+        let cookieStore = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+        persistAndShare(cookies: cookieStore)
+    }
+
+    static func restoreEverywhere() async {
+        restoreToSharedStorage()
+        await seedWebCookieStore(WKWebsiteDataStore.default().httpCookieStore)
+        await syncWebCookiesToSharedStorage()
+    }
+
     static func persistAndShare(cookies: [HTTPCookie]) {
         let filteredCookies = bilibiliCookies(from: cookies)
         guard !filteredCookies.isEmpty else { return }
@@ -76,11 +87,19 @@ enum BilibiliCookieStore {
     }
 }
 
-private extension WKHTTPCookieStore {
+extension WKHTTPCookieStore {
     func setCookie(_ cookie: HTTPCookie) async {
         await withCheckedContinuation { continuation in
             setCookie(cookie) {
                 continuation.resume()
+            }
+        }
+    }
+
+    func allCookies() async -> [HTTPCookie] {
+        await withCheckedContinuation { continuation in
+            getAllCookies { cookies in
+                continuation.resume(returning: cookies)
             }
         }
     }

@@ -7,6 +7,8 @@ final class LocalHLSProxyServer {
     private let queue = DispatchQueue(label: "ccbili.local-hls-proxy")
     private let serverPort: UInt16 = 28757
     private var listener: NWListener?
+    private var listenerState: NWListener.State = .setup
+    private var readyContinuations: [CheckedContinuation<Void, Error>] = []
     private var routes: [String: Route] = [:]
     private var routeCounter = 0
     private var playlists: [String: String] = [:]
@@ -24,6 +26,21 @@ final class LocalHLSProxyServer {
         return URL(string: "http://127.0.0.1:\(serverPort)/dash/\(id)")!
     }
 
+    func waitUntilReady() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                switch self.listenerState {
+                case .ready:
+                    continuation.resume()
+                case .failed(let error):
+                    continuation.resume(throwing: error)
+                default:
+                    self.readyContinuations.append(continuation)
+                }
+            }
+        }
+    }
+
     func registerPlaylist(_ content: String, name: String) throws -> URL {
         try startIfNeeded()
         playlistCounter += 1
@@ -34,7 +51,12 @@ final class LocalHLSProxyServer {
     }
 
     private func startIfNeeded() throws {
-        if listener != nil { return }
+        if listener != nil, case .ready = listenerState { return }
+        if listener != nil, case .setup = listenerState { return }
+        if listener != nil, case .waiting = listenerState { return }
+        listener?.cancel()
+        listener = nil
+        listenerState = .setup
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
         guard let port = NWEndpoint.Port(rawValue: serverPort) else {
@@ -43,6 +65,27 @@ final class LocalHLSProxyServer {
         let listener = try NWListener(using: parameters, on: port)
         listener.newConnectionHandler = { [weak self] connection in
             self?.handle(connection: connection)
+        }
+        listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            self.queue.async {
+                self.listenerState = state
+                if case .ready = state {
+                    let continuations = self.readyContinuations
+                    self.readyContinuations.removeAll()
+                    continuations.forEach { $0.resume() }
+                }
+                if case .failed = state {
+                    let continuations = self.readyContinuations
+                    self.readyContinuations.removeAll()
+                    continuations.forEach { $0.resume(throwing: APIError.serverMessage("HLS 本地代理启动失败")) }
+                    self.listener?.cancel()
+                    self.listener = nil
+                }
+                if case .cancelled = state {
+                    self.listener = nil
+                }
+            }
         }
         listener.start(queue: queue)
         self.listener = listener

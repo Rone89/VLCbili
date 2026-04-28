@@ -19,16 +19,22 @@ struct ccbiliApp: App {
                 .environment(authManager)
                 .onAppear {
                     BilibiliCookieStore.restoreToSharedStorage()
+                    Task {
+                        await BilibiliCookieStore.restoreEverywhere()
+                    }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
                     case .active:
-                        BilibiliCookieStore.restoreToSharedStorage()
                         Task {
+                            await BilibiliCookieStore.restoreEverywhere()
                             await authManager.refreshLoginStatus(allowOfflineFallback: true)
                         }
                     case .background:
-                        BilibiliCookieStore.persistSharedStorage()
+                        Task {
+                            await BilibiliCookieStore.syncWebCookiesToSharedStorage()
+                            BilibiliCookieStore.persistSharedStorage()
+                        }
                     case .inactive:
                         break
                     @unknown default:
