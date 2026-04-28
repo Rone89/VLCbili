@@ -291,22 +291,6 @@ struct PlayURLService {
             )
         }
 
-        if preferredQuality > 80, !(data.acceptQuality ?? []).contains(where: { $0 >= 80 }) {
-            let wbiData = try await fetchWBIPlayURLData(
-                bvid: bvid,
-                cid: cid,
-                preferredQuality: preferredQuality,
-                fnval: fnval,
-                headers: headers
-            )
-
-            guard (wbiData.acceptQuality ?? []).contains(where: { $0 >= 80 }) else {
-                throw APIError.serverMessage("当前播放接口只返回了 720P 及以下清晰度，请确认账号已登录且具备高清视频权限")
-            }
-
-            return wbiData
-        }
-
         return data
     }
 
