@@ -102,7 +102,7 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
         }
 
         private func playHLSManifest(source: PlayableVideoSource) async throws {
-            let manifestURL = try DashHLSManifestService().makeManifest(for: source)
+            let manifestURL = try await DashHLSManifestService().makeManifest(for: source)
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 let item = AVPlayerItem(url: manifestURL)

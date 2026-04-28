@@ -1,10 +1,11 @@
 ﻿## 本版本修复
 
-- 按你的建议新增 DASH → HLS 流式播放路径：1080P+/1080P60/4K 优先生成本地 HLS master/video/audio 清单交给 AVPlayer 播放。
-- HLS 清单使用 B 站 DASH 的 `segment_base.initialization` 作为 `EXT-X-MAP`，视频轨和音频轨分别生成 media playlist，再由 master playlist 关联。
-- 该方案不再等待整段下载合流，目标是保留系统播放器稳定性的同时实现接近 PiliPlus 的流式起播。
-- 如果 DASH→HLS 清单播放失败，仍保留旧的本地合流兜底，避免高画质完全不可播。
+- 修复 DASH→HLS 第一版不能出画/无声：不再把整条 DASH 文件当成单个 HLS 分片。
+- 新增 sidx/index_range 解析：下载视频轨和音频轨的索引段，解析每个 subsegment 的 byte range 和 duration。
+- HLS media playlist 现在为每个 DASH subsegment 生成 `EXTINF` + `EXT-X-BYTERANGE`，并保留 `EXT-X-MAP` 初始化段。
+- 诊断文本标记为 `DASH-to-HLS-sidx`，方便确认运行的是本次分片 HLS 路径。
+- HLS 失败仍会兜底旧本地合流，避免高画质完全不可播。
 
 ## 说明
 
-这是 DASH→HLS 第一版验证：请重点测试 1080P+/4K 是否能出画、有声、加载是否明显快于完整合流。
+这是 DASH→HLS 第二版验证：重点测试 1080P+/4K 是否能出画、有声，以及是否比完整合流更快起播。

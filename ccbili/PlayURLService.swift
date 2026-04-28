@@ -15,7 +15,9 @@ struct PlayableVideoSource: Equatable {
     let isDASHSeparated: Bool
     let duration: TimeInterval?
     let videoInitRange: String?
+    let videoIndexRange: String?
     let audioInitRange: String?
+    let audioIndexRange: String?
     let bandwidth: Int?
     let width: Int?
     let height: Int?
@@ -141,7 +143,9 @@ struct PlayURLService {
                 isDASHSeparated: true,
                 duration: data.duration.map { TimeInterval($0) / 1000 },
                 videoInitRange: video.segmentBase?.initialization,
+                videoIndexRange: video.segmentBase?.indexRange,
                 audioInitRange: audio.segmentBase?.initialization,
+                audioIndexRange: audio.segmentBase?.indexRange,
                 bandwidth: video.bandwidth,
                 width: video.width,
                 height: video.height,
@@ -152,7 +156,7 @@ struct PlayURLService {
                 quality: selectedQuality,
                 qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
                 availableQualities: qualityOptions(from: data),
-                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH-to-HLS", headers: headers),
+                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH-to-HLS-sidx", headers: headers),
                 bvid: bvid,
                 cid: cid
             )
@@ -168,7 +172,9 @@ struct PlayURLService {
             isDASHSeparated: false,
             duration: data.duration.map { TimeInterval($0) / 1000 },
             videoInitRange: video.segmentBase?.initialization,
+            videoIndexRange: video.segmentBase?.indexRange,
             audioInitRange: nil,
+            audioIndexRange: nil,
             bandwidth: video.bandwidth,
             width: video.width,
             height: video.height,
@@ -209,7 +215,9 @@ struct PlayURLService {
                 isDASHSeparated: false,
                 duration: data.duration.map { TimeInterval($0) / 1000 },
                 videoInitRange: nil,
+                videoIndexRange: nil,
                 audioInitRange: nil,
+                audioIndexRange: nil,
                 bandwidth: nil,
                 width: nil,
                 height: nil,
@@ -255,7 +263,9 @@ struct PlayURLService {
                 isDASHSeparated: source.isDASHSeparated,
                 duration: source.duration,
                 videoInitRange: source.videoInitRange,
+                videoIndexRange: source.videoIndexRange,
                 audioInitRange: source.audioInitRange,
+                audioIndexRange: source.audioIndexRange,
                 bandwidth: source.bandwidth,
                 width: source.width,
                 height: source.height,
