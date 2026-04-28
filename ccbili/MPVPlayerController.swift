@@ -6,8 +6,6 @@ import libmpv
 final class MPVPlayerController {
     private var mpv: OpaquePointer?
     private var isInitialized = false
-    var timeUpdateHandler: ((TimeInterval, TimeInterval, Bool) -> Void)?
-    private var observerTask: Task<Void, Never>?
 
     init() {
         mpv = mpv_create()
@@ -27,7 +25,6 @@ final class MPVPlayerController {
 
     deinit {
         stop()
-        observerTask?.cancel()
         if let mpv {
             mpv_terminate_destroy(mpv)
         }
@@ -39,7 +36,6 @@ final class MPVPlayerController {
         setOption("wid", format: MPV_FORMAT_INT64, value: &viewPointer)
         if let mpv, mpv_initialize(mpv) >= 0 {
             isInitialized = true
-            startObservingPlayback()
         }
     }
 
@@ -60,13 +56,7 @@ final class MPVPlayerController {
     }
 
     func stop() {
-        observerTask?.cancel()
-        observerTask = nil
         command(["stop"])
-    }
-
-    func seek(to position: Double) {
-        command(["seek", String(position * 100), "absolute-percent"])
     }
 
     private func configureHeaders(_ headers: [String: String]) {
@@ -115,39 +105,6 @@ final class MPVPlayerController {
         }
     }
 
-    private func startObservingPlayback() {
-        observerTask?.cancel()
-        observerTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
-                guard let self else { return }
-                let current = self.doubleProperty("time-pos") ?? 0
-                let duration = self.doubleProperty("duration") ?? 0
-                let paused = self.boolProperty("pause") ?? false
-                await MainActor.run { [weak self] in
-                    self?.timeUpdateHandler?(current, duration, !paused)
-                }
-            }
-        }
-    }
-
-    private func doubleProperty(_ name: String) -> Double? {
-        guard let mpv else { return nil }
-        var value = 0.0
-        let result = name.withCString { pointer in
-            mpv_get_property(mpv, pointer, MPV_FORMAT_DOUBLE, &value)
-        }
-        return result >= 0 ? value : nil
-    }
-
-    private func boolProperty(_ name: String) -> Bool? {
-        guard let mpv else { return nil }
-        var value: Int32 = 0
-        let result = name.withCString { pointer in
-            mpv_get_property(mpv, pointer, MPV_FORMAT_FLAG, &value)
-        }
-        return result >= 0 ? value != 0 : nil
-    }
 }
 
 private extension Array where Element == String {
