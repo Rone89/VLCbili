@@ -13,6 +13,8 @@ import Combine
 
 
 struct BilibiliVLCPlayerView: View {
+    @Environment(\.scenePhase) private var scenePhase
+
     let source: PlayableVideoSource
     private let enablesAutoFullscreen: Bool
     private let initialPosition: Double?
@@ -33,6 +35,8 @@ struct BilibiliVLCPlayerView: View {
     @State private var surfaceID = UUID()
     @State private var hlsDiagnosticsText = HLSPlaybackDiagnostics.shared.summary
     @State private var didReceiveFirstProgress = false
+    @State private var seekResumePlayback = false
+    @State private var hasAppeared = false
     private let diagnosticsTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(
@@ -59,6 +63,10 @@ struct BilibiliVLCPlayerView: View {
             showControlsTemporarily()
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             schedulePendingSeekIfNeeded()
+            if hasAppeared, currentSource.isDASHSeparated {
+                rebuildPlaybackSurfaceKeepingPosition()
+            }
+            hasAppeared = true
         }
         .onReceive(playbackState.$position) { position in
             onPositionChange(position)
@@ -80,17 +88,23 @@ struct BilibiliVLCPlayerView: View {
 
             if orientation == .landscapeLeft || orientation == .landscapeRight {
                 fullscreenOrientation = orientation
+                AppOrientationController.lock(.landscape)
                 isFullscreenPresented = true
             } else if orientation == .portrait || orientation == .portraitUpsideDown {
                 isFullscreenPresented = false
+                AppOrientationController.lock(.portrait)
             }
         }
         .onReceive(diagnosticsTimer) { _ in
             hlsDiagnosticsText = HLSPlaybackDiagnostics.shared.summary
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active, currentSource.isDASHSeparated {
+                rebuildPlaybackSurfaceKeepingPosition()
+            }
+        }
         .onDisappear {
             hideControlsTask?.cancel()
-            commandCenter.stop()
         }
     }
 
@@ -301,8 +315,14 @@ struct BilibiliVLCPlayerView: View {
                         playbackState.isScrubbing = isEditing
                         showControlsTemporarily()
 
+                        if isEditing {
+                            seekResumePlayback = playbackState.isPlaying
+                        }
+
                         if !isEditing {
-                            commandCenter.seek(to: playbackState.position)
+                            let targetPosition = playbackState.position
+                            playbackState.pendingSeekPosition = targetPosition
+                            commandCenter.seek(to: targetPosition, resumePlayback: seekResumePlayback)
                             showControlsTemporarily()
                         }
                     }
@@ -380,6 +400,14 @@ struct BilibiliVLCPlayerView: View {
         }
     }
 
+    private func rebuildPlaybackSurfaceKeepingPosition() {
+        pendingSeekPosition = playbackState.position
+        playbackState.pendingSeekPosition = playbackState.position
+        didReceiveFirstProgress = false
+        surfaceID = UUID()
+        schedulePendingSeekIfNeeded()
+    }
+
     @MainActor
     private func switchQuality(to option: VideoQualityOption) async {
         if option.quality == currentSource.quality,
@@ -418,6 +446,7 @@ struct BilibiliVLCPlayerView: View {
 
 final class BilibiliVLCPlaybackState: ObservableObject {
     @Published var position: Double = 0
+    @Published var pendingSeekPosition: Double?
     @Published var elapsedText = "00:00"
     @Published var durationText = "00:00"
     @Published var isPlaying = false
@@ -425,6 +454,7 @@ final class BilibiliVLCPlaybackState: ObservableObject {
 
     func resetForNewMedia() {
         position = 0
+        pendingSeekPosition = nil
         elapsedText = "00:00"
         durationText = "00:00"
         isPlaying = false
@@ -434,15 +464,15 @@ final class BilibiliVLCPlaybackState: ObservableObject {
 
 final class BilibiliVLCCommandCenter: ObservableObject {
     var togglePlayHandler: (() -> Void)?
-    var seekHandler: ((Double) -> Void)?
+    var seekHandler: ((Double, Bool) -> Void)?
     var stopHandler: (() -> Void)?
 
     func togglePlay() {
         togglePlayHandler?()
     }
 
-    func seek(to position: Double) {
-        seekHandler?(position)
+    func seek(to position: Double, resumePlayback: Bool = true) {
+        seekHandler?(position, resumePlayback)
     }
 
     func stop() {
@@ -535,11 +565,19 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
                 self.updatePlaybackState()
             }
 
-            commandCenter?.seekHandler = { [weak self] position in
+            commandCenter?.seekHandler = { [weak self] position, resumePlayback in
                 guard let self, let item = self.player.currentItem else { return }
                 let duration = item.duration
                 guard duration.isValid, duration.seconds.isFinite, duration.seconds > 0 else { return }
-                self.player.seek(to: CMTime(seconds: duration.seconds * position, preferredTimescale: 600))
+                let target = CMTime(seconds: duration.seconds * position, preferredTimescale: 600)
+                self.player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+                    guard let self else { return }
+                    if resumePlayback {
+                        self.player.play()
+                    }
+                    self.playbackState?.pendingSeekPosition = nil
+                    self.updatePlaybackState()
+                }
             }
 
             commandCenter?.stopHandler = { [weak self] in
@@ -568,7 +606,9 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
             let currentTime = player.currentTime().seconds
             let duration = player.currentItem?.duration.seconds ?? 0
 
-            if !playbackState.isScrubbing {
+            if let pendingSeekPosition = playbackState.pendingSeekPosition {
+                playbackState.position = pendingSeekPosition
+            } else if !playbackState.isScrubbing {
                 if duration.isFinite, duration > 0, currentTime.isFinite {
                     playbackState.position = max(0, min(1, currentTime / duration))
                 } else {

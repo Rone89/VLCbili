@@ -95,13 +95,19 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                 self.updatePlaybackState()
             }
 
-            commandCenter?.seekHandler = { [weak self] position in
+            commandCenter?.seekHandler = { [weak self] position, resumePlayback in
                 guard let self, let item = self.player.currentItem else { return }
                 let duration = item.duration
                 guard duration.isValid, duration.isNumeric, duration.seconds > 0 else { return }
                 let target = CMTime(seconds: duration.seconds * min(max(position, 0), 1), preferredTimescale: 600)
                 self.player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-                    self?.updatePlaybackState()
+                    guard let self else { return }
+                    if resumePlayback {
+                        self.shouldAutoplay = true
+                        self.player.play()
+                    }
+                    self.playbackState?.pendingSeekPosition = nil
+                    self.updatePlaybackState()
                 }
             }
 
@@ -211,7 +217,9 @@ struct AVFoundationDASHPlayerView: UIViewRepresentable {
                     playbackState.durationText = "00:00"
                     return
                 }
-                if !playbackState.isScrubbing {
+                if let pendingSeekPosition = playbackState.pendingSeekPosition {
+                    playbackState.position = pendingSeekPosition
+                } else if !playbackState.isScrubbing {
                     playbackState.position = min(max(current.seconds / duration.seconds, 0), 1)
                 }
                 playbackState.elapsedText = Self.timeText(current.seconds)
