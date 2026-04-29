@@ -15,12 +15,14 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = context.coordinator.player
+        controller.delegate = context.coordinator
         controller.showsPlaybackControls = true
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.entersFullScreenWhenPlaybackBegins = false
         controller.exitsFullScreenWhenPlaybackEnds = true
         controller.videoGravity = .resizeAspectFill
+        AppOrientationController.lock(.allButUpsideDown)
         context.coordinator.play(source: source)
         return controller
     }
@@ -36,6 +38,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 
     static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
         coordinator.stop()
+        AppOrientationController.lock(.portrait)
     }
 
     final class Coordinator {
@@ -319,6 +322,22 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             enrichedHeaders["Connection"] = "keep-alive"
             return ["AVURLAssetHTTPHeaderFieldsKey": enrichedHeaders]
         }
+    }
+}
+
+extension AVFoundationDASHPlayerView.Coordinator: AVPlayerViewControllerDelegate {
+    func playerViewController(
+        _ playerViewController: AVPlayerViewController,
+        willBeginFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
+    ) {
+        AppOrientationController.lock(.landscape)
+    }
+
+    func playerViewController(
+        _ playerViewController: AVPlayerViewController,
+        willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
+    ) {
+        AppOrientationController.lock(.portrait)
     }
 }
 

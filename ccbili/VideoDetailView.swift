@@ -43,13 +43,7 @@ struct VideoDetailView: View {
                     playerCardSection(height: playerHeight)
                         .frame(width: contentWidth)
 
-                    titleCardSection
-                        .frame(width: contentWidth)
-
-                    authorSection
-                        .frame(width: contentWidth)
-
-                    actionSection
+                    videoInfoSection
                         .frame(width: contentWidth)
 
                     errorSection
@@ -74,7 +68,7 @@ struct VideoDetailView: View {
         .toolbar(.hidden, for: .tabBar)
         .onAppear {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            AppOrientationController.lock(.allButUpsideDown)
+            AppOrientationController.lock(.portrait)
         }
         .task {
             favoriteViewModel.load(videoID: viewModel.playbackItem.id)
@@ -273,6 +267,103 @@ struct VideoDetailView: View {
                 endPoint: .bottom
             )
         )
+    }
+
+    // MARK: - Info
+
+    private var videoInfoSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            authorSummaryRow
+
+            Text(viewModel.playbackItem.title)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+                .lineLimit(nil)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+
+            HStack(spacing: 8) {
+                metaChip(systemImage: "play.rectangle", text: "播放数待接入")
+                metaChip(systemImage: "calendar", text: viewModel.uploadTimeText)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(infoTags, id: \.self) { tag in
+                    Text(tag)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
+                }
+            }
+
+            actionSection
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color(.secondarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                .strokeBorder(Color(.separator).opacity(0.08), lineWidth: 0.5)
+        }
+    }
+
+    private var authorSummaryRow: some View {
+        HStack(spacing: 12) {
+            authorAvatarView
+                .frame(width: 42, height: 42)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(viewModel.author?.name ?? viewModel.playbackItem.subtitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(viewModel.author?.followerText ?? "粉丝数待接入")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("+ 关注") {}
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(biliPink, in: Capsule())
+        }
+    }
+
+    private var authorAvatarView: some View {
+        AsyncImage(url: viewModel.author?.avatarURL) { phase in
+            switch phase {
+            case .empty:
+                Circle()
+                    .fill(Color(.quaternarySystemFill))
+                    .overlay { ProgressView() }
+            case .success(let image):
+                image.resizable().scaledToFill()
+            case .failure:
+                Circle()
+                    .fill(Color(.quaternarySystemFill))
+                    .overlay { Image(systemName: "person.fill").foregroundStyle(.secondary) }
+            @unknown default:
+                Circle().fill(Color(.quaternarySystemFill))
+            }
+        }
+    }
+
+    private var infoTags: [String] {
+        var tags = ["视频", "Bilibili"]
+        if let quality = viewModel.playbackSource?.qualityDescription {
+            tags.append(quality)
+        }
+        return tags
     }
 
     // MARK: - Title
