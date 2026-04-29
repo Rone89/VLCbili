@@ -24,6 +24,7 @@ struct VideoDetailView: View {
     @State private var commentSortMode: CommentSortMode = .hot
     @State private var isVideoPlaying = false
     @State private var videoAspectRatio: CGFloat = 16 / 9
+    @State private var playerScrollMinY: CGFloat = 0
     @State private var restoredPlaybackPosition: Double?
     @State private var lastSavedPlaybackSecond = 0
     @State private var expandedCommentReplies: [String: [VideoCommentPreviewReply]] = [:]
@@ -34,6 +35,7 @@ struct VideoDetailView: View {
     private let detailCardCornerRadius: CGFloat = 20
     private let cardCornerRadius: CGFloat = 18
     private let pageHorizontalInset: CGFloat = 16
+    private let playerPinnedTopOffset: CGFloat = 12
     private let titleHorizontalInset: CGFloat = 16
 
     init(item: VideoItem) {
@@ -50,6 +52,16 @@ struct VideoDetailView: View {
                     playerCardSection(height: playerHeight)
                         .frame(width: playerWidth)
                         .padding(.horizontal, -pageHorizontalInset)
+                        .offset(y: pinnedVideoOffset)
+                        .zIndex(isVideoPlaying ? 10 : 0)
+                        .background(
+                            GeometryReader { playerProxy in
+                                Color.clear.preference(
+                                    key: VideoDetailPlayerMinYPreferenceKey.self,
+                                    value: playerProxy.frame(in: .named("videoDetailScroll")).minY
+                                )
+                            }
+                        )
 
                     videoInfoSection
                         .frame(width: contentWidth)
@@ -67,6 +79,10 @@ struct VideoDetailView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .top)
+            }
+            .coordinateSpace(name: "videoDetailScroll")
+            .onPreferenceChange(VideoDetailPlayerMinYPreferenceKey.self) { value in
+                playerScrollMinY = value
             }
             .background(Color(.systemGroupedBackground))
             .animation(.spring(response: 0.32, dampingFraction: 0.88), value: isVideoPlaying)
@@ -124,6 +140,14 @@ struct VideoDetailView: View {
         videoHeaderSection(height: height)
             .frame(maxWidth: .infinity)
             .frame(height: height)
+    }
+
+    private var pinnedVideoOffset: CGFloat {
+        guard isVideoPlaying else {
+            return 0
+        }
+
+        return max(0, playerPinnedTopOffset - playerScrollMinY)
     }
 
     @ViewBuilder
@@ -1214,6 +1238,14 @@ private enum DetailTab: Hashable {
     case intro
     case comments
     case related
+}
+
+private struct VideoDetailPlayerMinYPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
 
 private enum CommentSortMode: CaseIterable {
