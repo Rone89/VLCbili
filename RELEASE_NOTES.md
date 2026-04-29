@@ -1,10 +1,12 @@
 # 本版本说明
 
-## 修复与优化
+## 修复问题
 
-- 统一视频列表卡片封面为 16:9 等宽展示，优化搜索页和个人主页中封面有大有小的问题。
-- 视频详情页 UP 主头像和昵称现在可以点击进入原生个人主页。
-- 视频详情页 UP 主信息卡片中的头像和昵称同样支持进入个人主页。
+- 重构播放器横竖屏切换，不再用 SwiftUI `rotationEffect` 手动旋转视频和控制层。
+- 全屏播放改为系统方向转场，由 `UIWindowScene.requestGeometryUpdate` 和 `viewWillTransition(to:with:)` 驱动。
+- AVPlayerLayer 的 frame 更新通过 `CATransaction` 控制隐式动画，避免和 UIView/系统旋转动画打架。
+- 横竖屏切换时显式调用 `layoutIfNeeded()`，减少约束和 SwiftUI 布局不同步导致的跳变。
+- 固定 `videoGravity = .resizeAspect`，避免容器尺寸变化瞬间画面拉伸抖动。
 
 ## 打包说明
 

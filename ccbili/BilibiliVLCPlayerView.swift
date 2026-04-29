@@ -125,14 +125,10 @@ struct BilibiliVLCPlayerView: View {
             let orientation = UIDevice.current.orientation
 
             if orientation == .landscapeLeft || orientation == .landscapeRight {
-                withAnimation(.easeInOut(duration: 0.28)) {
-                    fullscreenOrientation = orientation
-                    isFullscreenPresented = true
-                }
+                fullscreenOrientation = orientation
+                isFullscreenPresented = true
             } else if orientation == .portrait || orientation == .portraitUpsideDown {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    isFullscreenPresented = false
-                }
+                isFullscreenPresented = false
             }
         }
         .onReceive(diagnosticsTimer) { _ in
@@ -547,11 +543,6 @@ struct BilibiliVLCPlayerView: View {
         schedulePendingSeekIfNeeded()
     }
 
-    private func rotationAngle(for orientation: UIDeviceOrientation) -> Angle {
-        guard isFullscreenPresented else { return .zero }
-        return orientation == .landscapeLeft ? .degrees(90) : .degrees(-90)
-    }
-
     @MainActor
     private func switchQuality(to option: VideoQualityOption) async {
         if option.quality == currentSource.quality {
@@ -680,6 +671,7 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
         fileprivate weak var commandCenter: BilibiliVLCCommandCenter?
         private var window: UIWindow?
         private var hostingController: UIHostingController<FullscreenPlayerOverlay>?
+        private var rootController: FullscreenPlayerHostingController?
         private let playerLayer = AVPlayerLayer()
         private var onLayerDetachedChange: ((Bool) -> Void)?
 
@@ -718,11 +710,17 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
             onLayerDetachedChange: @escaping (Bool) -> Void,
             onDismiss: @escaping () -> Void
         ) {
+            guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive })
+            else { return }
+
+            let orientationMask = interfaceOrientationMask(for: orientation)
+            AppOrientationController.lock(orientationMask, scene: scene)
             commandCenter.attachPlayerLayer(playerLayer)
             onLayerDetachedChange(true)
             let overlay = FullscreenPlayerOverlay(
                 playerLayer: playerLayer,
-                orientation: orientation,
                 playbackState: playbackState,
                 commandCenter: commandCenter,
                 debugText: debugText,
@@ -736,28 +734,27 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
                 return
             }
 
-            guard let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive })
-            else { return }
-
             let newWindow = UIWindow(windowScene: scene)
             newWindow.windowLevel = .alert + 1
             newWindow.backgroundColor = .black
-            let controller = UIHostingController(rootView: overlay)
+            let controller = FullscreenPlayerHostingController(rootView: overlay)
+            controller.orientationMask = orientationMask
+            controller.preferredOrientation = interfaceOrientation(for: orientation)
             controller.view.backgroundColor = .black
             newWindow.rootViewController = controller
             newWindow.alpha = 0
             newWindow.isHidden = false
             window = newWindow
             hostingController = controller
+            rootController = controller
 
             UIView.animate(
-                withDuration: 0.24,
+                withDuration: 0.28,
                 delay: 0,
-                options: [.curveEaseInOut, .beginFromCurrentState]
+                options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
             ) {
                 newWindow.alpha = 1
+                controller.view.layoutIfNeeded()
             }
         }
 
@@ -771,27 +768,54 @@ private struct FullscreenPlayerWindowPresenter: UIViewRepresentable {
             }
 
             UIView.animate(
-                withDuration: 0.22,
+                withDuration: 0.24,
                 delay: 0,
-                options: [.curveEaseInOut, .beginFromCurrentState]
+                options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
             ) {
                 window.alpha = 0
+                window.rootViewController?.view.layoutIfNeeded()
             } completion: { [weak self] _ in
                 Task { @MainActor in
                     commandCenter?.attachPlayerLayer(nil)
                     self?.onLayerDetachedChange?(false)
                     self?.hostingController = nil
+                    self?.rootController = nil
                     window.isHidden = true
                     self?.window = nil
+                    AppOrientationController.lock(.portrait, scene: window.windowScene)
                 }
             }
+        }
+
+        private func interfaceOrientationMask(for orientation: UIDeviceOrientation) -> UIInterfaceOrientationMask {
+            orientation == .landscapeRight ? .landscapeRight : .landscapeLeft
+        }
+
+        private func interfaceOrientation(for orientation: UIDeviceOrientation) -> UIInterfaceOrientation {
+            orientation == .landscapeRight ? .landscapeRight : .landscapeLeft
+        }
+    }
+}
+
+private final class FullscreenPlayerHostingController: UIHostingController<FullscreenPlayerOverlay> {
+    var orientationMask: UIInterfaceOrientationMask = .landscape
+    var preferredOrientation: UIInterfaceOrientation = .landscapeRight
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { orientationMask }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { preferredOrientation }
+    override var prefersStatusBarHidden: Bool { true }
+    override var prefersHomeIndicatorAutoHidden: Bool { true }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate { [weak self] _ in
+            self?.view.layoutIfNeeded()
         }
     }
 }
 
 private struct FullscreenPlayerOverlay: View {
     let playerLayer: AVPlayerLayer
-    let orientation: UIDeviceOrientation
     @ObservedObject var playbackState: BilibiliVLCPlaybackState
     let commandCenter: BilibiliVLCCommandCenter
     let debugText: String?
@@ -803,8 +827,7 @@ private struct FullscreenPlayerOverlay: View {
                 Color.black.ignoresSafeArea()
 
                 PlayerLayerHost(playerLayer: playerLayer)
-                    .frame(width: proxy.size.height, height: proxy.size.width)
-                    .rotationEffect(rotationAngle)
+                    .frame(width: proxy.size.width, height: proxy.size.height)
                     .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
 
                 Color.black.opacity(0.001)
@@ -877,17 +900,11 @@ private struct FullscreenPlayerOverlay: View {
                     .padding(.bottom, 24)
                     .liquidGlassCapsule(cornerRadius: 24, interactive: true)
                 }
-                .rotationEffect(rotationAngle)
-                .frame(width: proxy.size.height, height: proxy.size.width)
+                .frame(width: proxy.size.width, height: proxy.size.height)
                 .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
             }
         }
         .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.28), value: orientation)
-    }
-
-    private var rotationAngle: Angle {
-        orientation == .landscapeLeft ? .degrees(90) : .degrees(-90)
     }
 }
 
@@ -909,7 +926,7 @@ private struct PlayerLayerHost: UIViewRepresentable {
             uiView.layer.addSublayer(playerLayer)
         }
         uiView.hostedPlayerLayer = playerLayer
-        playerLayer.frame = uiView.bounds
+        uiView.layoutHostedPlayerLayer(animated: context.transaction.animation != nil)
     }
 
     static func dismantleUIView(_ uiView: PlayerLayerContainerView, coordinator: ()) {
@@ -923,7 +940,27 @@ private final class PlayerLayerContainerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        hostedPlayerLayer?.frame = bounds
+        layoutHostedPlayerLayer(animated: inheritedAnimationDuration > 0)
+    }
+
+    func layoutHostedPlayerLayer(animated: Bool) {
+        guard let hostedPlayerLayer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(!animated)
+        if animated {
+            CATransaction.setAnimationDuration(inheritedAnimationDuration)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        }
+        hostedPlayerLayer.videoGravity = .resizeAspect
+        hostedPlayerLayer.frame = bounds
+        CATransaction.commit()
+    }
+}
+
+private extension UIView {
+    var inheritedAnimationDuration: TimeInterval {
+        let duration = layer.animation(forKey: "bounds")?.duration ?? layer.animation(forKey: "position")?.duration ?? 0
+        return duration > 0 ? duration : 0
     }
 }
 
@@ -979,8 +1016,10 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
             inlinePlayerLayer = layer
             guard !isUsingExternalPlayerLayer else { return }
             playerLayer = layer
-            layer.videoGravity = .resizeAspect
-            layer.player = player
+            CATransaction.performWithoutActions {
+                layer.videoGravity = .resizeAspect
+                layer.player = player
+            }
         }
 
         func play(source: PlayableVideoSource) {
@@ -1051,16 +1090,24 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
                 guard let self else { return }
                 if let layer {
                     self.isUsingExternalPlayerLayer = true
-                    self.playerLayer?.player = nil
+                    CATransaction.performWithoutActions {
+                        self.playerLayer?.player = nil
+                    }
                     self.playerLayer = layer
-                    layer.videoGravity = .resizeAspect
-                    layer.player = self.player
+                    CATransaction.performWithoutActions {
+                        layer.videoGravity = .resizeAspect
+                        layer.player = self.player
+                    }
                 } else if let inlinePlayerLayer = self.inlinePlayerLayer {
                     self.isUsingExternalPlayerLayer = false
-                    self.playerLayer?.player = nil
+                    CATransaction.performWithoutActions {
+                        self.playerLayer?.player = nil
+                    }
                     self.playerLayer = inlinePlayerLayer
-                    inlinePlayerLayer.videoGravity = .resizeAspect
-                    inlinePlayerLayer.player = self.player
+                    CATransaction.performWithoutActions {
+                        inlinePlayerLayer.videoGravity = .resizeAspect
+                        inlinePlayerLayer.player = self.player
+                    }
                 }
             }
         }
