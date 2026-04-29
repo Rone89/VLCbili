@@ -15,6 +15,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = context.coordinator.player
+        context.coordinator.attachInlineController(controller)
         controller.showsPlaybackControls = true
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = true
@@ -29,6 +30,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         if controller.player !== context.coordinator.player {
             controller.player = context.coordinator.player
         }
+        context.coordinator.attachInlineController(controller)
         controller.showsPlaybackControls = true
         controller.videoGravity = .resizeAspectFill
         context.coordinator.play(source: source)
@@ -48,14 +50,21 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private var statusObserver: NSKeyValueObservation?
         private var timeObserver: Any?
         private var shouldAutoplay = true
+        private var orientationObserver: NSObjectProtocol?
+        private weak var inlinePlayerViewController: AVPlayerViewController?
+        private var fullscreenWindow: UIWindow?
+        private var fullscreenController: LandscapePlayerFullscreenController?
 
         init(playbackState: BilibiliVLCPlaybackState, commandCenter: BilibiliVLCCommandCenter) {
             self.playbackState = playbackState
             self.commandCenter = commandCenter
             bindCommands()
+            startOrientationObservation()
         }
 
         deinit {
+            stopOrientationObservation()
+            dismissLandscapeFullscreen()
             removeTimeObserver()
         }
 
@@ -77,6 +86,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         }
 
         func stop() {
+            dismissLandscapeFullscreen()
             loadTask?.cancel()
             statusObserver?.invalidate()
             statusObserver = nil
@@ -84,6 +94,13 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             player.pause()
             player.replaceCurrentItem(with: nil)
             currentSource = nil
+        }
+
+        func attachInlineController(_ controller: AVPlayerViewController) {
+            inlinePlayerViewController = controller
+            if fullscreenController == nil, controller.player !== player {
+                controller.player = player
+            }
         }
 
         private func bindCommands() {
@@ -133,6 +150,65 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 self?.stop()
             }
 
+        }
+
+        private func startOrientationObservation() {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            orientationObserver = NotificationCenter.default.addObserver(
+                forName: UIDevice.orientationDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.handleDeviceOrientationChange(UIDevice.current.orientation)
+            }
+        }
+
+        private func stopOrientationObservation() {
+            if let orientationObserver {
+                NotificationCenter.default.removeObserver(orientationObserver)
+                self.orientationObserver = nil
+            }
+        }
+
+        private func handleDeviceOrientationChange(_ orientation: UIDeviceOrientation) {
+            switch orientation {
+            case .landscapeLeft, .landscapeRight:
+                presentLandscapeFullscreen(orientation: orientation)
+            case .portrait, .portraitUpsideDown:
+                dismissLandscapeFullscreen()
+            default:
+                break
+            }
+        }
+
+        private func presentLandscapeFullscreen(orientation: UIDeviceOrientation) {
+            if let fullscreenController {
+                fullscreenController.update(orientation: orientation)
+                return
+            }
+
+            guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive })
+            else { return }
+
+            let controller = LandscapePlayerFullscreenController(player: player, orientation: orientation)
+            inlinePlayerViewController?.player = nil
+            let window = UIWindow(windowScene: scene)
+            window.windowLevel = .alert + 2
+            window.backgroundColor = .black
+            window.rootViewController = controller
+            window.isHidden = false
+            fullscreenWindow = window
+            fullscreenController = controller
+        }
+
+        private func dismissLandscapeFullscreen() {
+            fullscreenController?.detachPlayer()
+            fullscreenController = nil
+            fullscreenWindow?.isHidden = true
+            fullscreenWindow = nil
+            inlinePlayerViewController?.player = player
         }
 
         private func loadAndPlay(source: PlayableVideoSource) async {
@@ -320,6 +396,70 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             enrichedHeaders["Connection"] = "keep-alive"
             return ["AVURLAssetHTTPHeaderFieldsKey": enrichedHeaders]
         }
+    }
+}
+
+final class LandscapePlayerFullscreenController: UIViewController {
+    private let player: AVPlayer
+    private let playerViewController = AVPlayerViewController()
+    private var orientation: UIDeviceOrientation
+
+    init(player: AVPlayer, orientation: UIDeviceOrientation) {
+        self.player = player
+        self.orientation = orientation
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .fullScreen
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var prefersStatusBarHidden: Bool { true }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+
+        playerViewController.player = player
+        playerViewController.showsPlaybackControls = true
+        playerViewController.allowsPictureInPicturePlayback = true
+        playerViewController.videoGravity = .resizeAspect
+
+        addChild(playerViewController)
+        view.addSubview(playerViewController.view)
+        playerViewController.didMove(toParent: self)
+        update(orientation: orientation)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutPlayerView()
+    }
+
+    func update(orientation: UIDeviceOrientation) {
+        self.orientation = orientation
+        guard isViewLoaded else { return }
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut]) {
+            self.layoutPlayerView()
+        }
+    }
+
+    func detachPlayer() {
+        playerViewController.player = nil
+        playerViewController.willMove(toParent: nil)
+        playerViewController.view.removeFromSuperview()
+        playerViewController.removeFromParent()
+    }
+
+    private func layoutPlayerView() {
+        let bounds = view.bounds
+        let rotationAngle: CGFloat = orientation == .landscapeLeft ? .pi / 2 : -.pi / 2
+        playerViewController.view.bounds = CGRect(x: 0, y: 0, width: bounds.height, height: bounds.width)
+        playerViewController.view.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        playerViewController.view.transform = CGAffineTransform(rotationAngle: rotationAngle)
     }
 }
 
