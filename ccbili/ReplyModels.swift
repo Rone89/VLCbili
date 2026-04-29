@@ -8,6 +8,32 @@ struct ReplyListResponse: Decodable {
 
 struct ReplyListData: Decodable {
     let replies: [ReplyItemDTO]?
+    let cursor: ReplyCursorDTO?
+    let page: ReplyPageDTO?
+}
+
+struct ReplyCursorDTO: Decodable {
+    let isEnd: Bool?
+    let paginationReply: ReplyPaginationDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case isEnd = "is_end"
+        case paginationReply = "pagination_reply"
+    }
+}
+
+struct ReplyPaginationDTO: Decodable {
+    let nextOffset: String?
+
+    enum CodingKeys: String, CodingKey {
+        case nextOffset = "next_offset"
+    }
+}
+
+struct ReplyPageDTO: Decodable {
+    let num: Int?
+    let size: Int?
+    let count: Int?
 }
 
 struct ReplyItemDTO: Decodable {

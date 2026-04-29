@@ -27,6 +27,13 @@ struct VideoDetailView: View {
     @State private var lastSavedPlaybackPercent = -1
     @State private var expandedCommentReplies: [String: [VideoCommentPreviewReply]] = [:]
     @State private var loadingReplyCommentIDs: Set<String> = []
+    @State private var isLoadingComments = false
+    @State private var isLoadingMoreComments = false
+    @State private var commentsNextOffset: String?
+    @State private var canLoadMoreComments = false
+    @State private var commentErrorMessage: String?
+    @State private var replyNextPages: [String: Int] = [:]
+    @State private var replyHasMore: [String: Bool] = [:]
 
     private let biliPink = Color(red: 251 / 255, green: 114 / 255, blue: 153 / 255)
     private let replyService = ReplyService()
@@ -89,6 +96,7 @@ struct VideoDetailView: View {
                 didLike = viewModel.viewerState.didLike
                 didCoin = viewModel.viewerState.didCoin
                 favoriteViewModel.isFavorite = viewModel.viewerState.didFavorite
+                await reloadComments(sortMode: commentSortMode)
             } else {
                 configurePlayer(for: viewModel.playURL)
             }
@@ -99,6 +107,7 @@ struct VideoDetailView: View {
         }
         .refreshable {
             await viewModel.load()
+            await reloadComments(sortMode: commentSortMode)
             favoriteViewModel.load(videoID: viewModel.playbackItem.id)
         }
         .onChange(of: viewModel.playURL) { _, newValue in
@@ -775,11 +784,25 @@ struct VideoDetailView: View {
 
             Divider()
 
-            if viewModel.isLoading && viewModel.comments.isEmpty {
+            if isLoadingComments && viewModel.comments.isEmpty {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("正在加载评论...")
                         .foregroundStyle(.secondary)
+                }
+            } else if let commentErrorMessage, viewModel.comments.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(commentErrorMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+
+                    Button("重试加载评论") {
+                        Task {
+                            await reloadComments(sortMode: commentSortMode)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             } else if viewModel.comments.isEmpty {
                 Text("暂无评论")
@@ -865,7 +888,9 @@ struct VideoDetailView: View {
                                     Spacer()
 
                                     if comment.replyCount > 0 {
-                                        Button(loadingReplyCommentIDs.contains(comment.id) ? "正在加载..." : "查看 \(comment.replyCount) 条回复") {
+                                        let isExpanded = expandedCommentReplies[comment.id] != nil
+                                        let canLoadMoreReplies = replyHasMore[comment.id] == true
+                                        Button(replyButtonTitle(for: comment, isExpanded: isExpanded, canLoadMore: canLoadMoreReplies)) {
                                             Task {
                                                 await loadReplies(for: comment)
                                             }
@@ -896,6 +921,36 @@ struct VideoDetailView: View {
 
                         Divider()
                     }
+                    .task {
+                        await loadMoreCommentsIfNeeded(currentComment: comment)
+                    }
+                }
+
+                if isLoadingMoreComments {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("正在加载更多评论...")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+                } else if let commentErrorMessage {
+                    Button("评论加载失败，点此重试") {
+                        Task {
+                            await loadMoreComments()
+                        }
+                    }
+                    .font(.footnote)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+                } else if !canLoadMoreComments {
+                    Text("没有更多评论了")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 8)
                 }
             }
         }
@@ -1145,26 +1200,70 @@ struct VideoDetailView: View {
     }
 
     private func reloadComments(sortMode: CommentSortMode) async {
-        guard let aid = viewModel.playbackItem.aid else { return }
+        guard let aid = viewModel.playbackItem.aid else {
+            viewModel.comments = []
+            commentErrorMessage = "缺少 aid，暂时无法加载评论"
+            return
+        }
+
+        isLoadingComments = true
+        commentErrorMessage = nil
+        commentsNextOffset = nil
+        canLoadMoreComments = false
+        expandedCommentReplies = [:]
+        replyNextPages = [:]
+        replyHasMore = [:]
+
+        defer {
+            isLoadingComments = false
+        }
 
         do {
-            let loadedComments = try await replyService.fetchVideoReplies(
+            let page = try await replyService.fetchVideoReplyPage(
                 oid: aid,
                 type: 1,
-                sort: sortMode.replySortValue
+                sort: sortMode.replySortValue,
+                offset: nil
             )
-            viewModel.comments = loadedComments
+            viewModel.comments = page.comments
+            commentsNextOffset = page.nextOffset
+            canLoadMoreComments = page.hasMore
         } catch {
-            viewModel.comments = [
-                VideoComment(
-                    id: "comment-load-failed-\(sortMode.title)",
-                    username: "系统提示",
-                    message: "评论加载失败：\(error.localizedDescription)",
-                    userID: nil,
-                    avatarURL: nil,
-                    timeText: "时间未知"
-                )
-            ]
+            viewModel.comments = []
+            commentErrorMessage = "评论加载失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func loadMoreCommentsIfNeeded(currentComment: VideoComment) async {
+        guard currentComment.id == viewModel.comments.last?.id else { return }
+        await loadMoreComments()
+    }
+
+    private func loadMoreComments() async {
+        guard let aid = viewModel.playbackItem.aid,
+              canLoadMoreComments,
+              !isLoadingComments,
+              !isLoadingMoreComments else { return }
+
+        isLoadingMoreComments = true
+        commentErrorMessage = nil
+        defer {
+            isLoadingMoreComments = false
+        }
+
+        do {
+            let page = try await replyService.fetchVideoReplyPage(
+                oid: aid,
+                type: 1,
+                sort: commentSortMode.replySortValue,
+                offset: commentsNextOffset
+            )
+            let existingIDs = Set(viewModel.comments.map(\.id))
+            viewModel.comments.append(contentsOf: page.comments.filter { !existingIDs.contains($0.id) })
+            commentsNextOffset = page.nextOffset
+            canLoadMoreComments = page.hasMore
+        } catch {
+            commentErrorMessage = "更多评论加载失败：\(error.localizedDescription)"
         }
     }
 
@@ -1177,21 +1276,45 @@ struct VideoDetailView: View {
 
     private func loadReplies(for comment: VideoComment) async {
         guard let aid = viewModel.playbackItem.aid, let root = Int(comment.id) else { return }
-        if expandedCommentReplies[comment.id] != nil {
+        if expandedCommentReplies[comment.id] != nil, replyHasMore[comment.id] != true {
             expandedCommentReplies[comment.id] = nil
+            replyNextPages[comment.id] = nil
+            replyHasMore[comment.id] = nil
             return
         }
         loadingReplyCommentIDs.insert(comment.id)
         defer { loadingReplyCommentIDs.remove(comment.id) }
 
         do {
-            let replies = try await replyService.fetchReplyReplies(oid: aid, root: root)
-            expandedCommentReplies[comment.id] = replies
+            let pageNumber = replyNextPages[comment.id] ?? 1
+            let page = try await replyService.fetchReplyReplyPage(oid: aid, root: root, page: pageNumber)
+            let existingReplies = expandedCommentReplies[comment.id] ?? []
+            expandedCommentReplies[comment.id] = existingReplies + page.replies
+            replyNextPages[comment.id] = page.nextPage
+            replyHasMore[comment.id] = page.hasMore
         } catch {
             expandedCommentReplies[comment.id] = [
                 VideoCommentPreviewReply(username: "系统提示", message: "回复加载失败：\(error.localizedDescription)")
             ]
+            replyNextPages[comment.id] = nil
+            replyHasMore[comment.id] = false
         }
+    }
+
+    private func replyButtonTitle(for comment: VideoComment, isExpanded: Bool, canLoadMore: Bool) -> String {
+        if loadingReplyCommentIDs.contains(comment.id) {
+            return "正在加载..."
+        }
+
+        if isExpanded && canLoadMore {
+            return "加载更多回复"
+        }
+
+        if isExpanded {
+            return "收起回复"
+        }
+
+        return "查看 \(comment.replyCount) 条回复"
     }
 
     private func statsText(_ value: Int?, fallback: String) -> String {

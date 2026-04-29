@@ -1,17 +1,34 @@
-import Foundation
+﻿import Foundation
 
 struct ReplyService {
+    struct CommentPage {
+        let comments: [VideoComment]
+        let nextOffset: String?
+        let hasMore: Bool
+    }
+
+    struct ReplyPage {
+        let replies: [VideoCommentPreviewReply]
+        let nextPage: Int?
+        let hasMore: Bool
+    }
+
     func fetchVideoReplies(oid: Int, type: Int = 1, sort: Int = 1) async throws -> [VideoComment] {
+        try await fetchVideoReplyPage(oid: oid, type: type, sort: sort, offset: nil).comments
+    }
+
+    func fetchVideoReplyPage(oid: Int, type: Int = 1, sort: Int = 1, offset: String?) async throws -> CommentPage {
         var components = URLComponents(
             url: AppConfig.apiBaseURL.appending(path: "/x/v2/reply/main"),
             resolvingAgainstBaseURL: false
         )
 
+        let paginationOffset = offset ?? ""
         components?.queryItems = [
             URLQueryItem(name: "oid", value: String(oid)),
             URLQueryItem(name: "type", value: String(type)),
             URLQueryItem(name: "mode", value: String(sort + 2)),
-            URLQueryItem(name: "pagination_str", value: #"{"offset":""}"#)
+            URLQueryItem(name: "pagination_str", value: "{\"offset\":\"\(paginationOffset)\"}")
         ]
 
         guard let url = components?.url else {
@@ -46,10 +63,17 @@ struct ReplyService {
             )
         }
 
-        return comments
+        let nextOffset = response.data?.cursor?.paginationReply?.nextOffset
+        let isEnd = response.data?.cursor?.isEnd ?? (nextOffset?.isEmpty ?? true)
+        let hasMore = !isEnd
+        return CommentPage(comments: comments, nextOffset: nextOffset, hasMore: hasMore)
     }
 
     func fetchReplyReplies(oid: Int, root: Int, type: Int = 1) async throws -> [VideoCommentPreviewReply] {
+        try await fetchReplyReplyPage(oid: oid, root: root, type: type, page: 1).replies
+    }
+
+    func fetchReplyReplyPage(oid: Int, root: Int, type: Int = 1, page: Int = 1) async throws -> ReplyPage {
         var components = URLComponents(
             url: AppConfig.apiBaseURL.appending(path: "/x/v2/reply/reply"),
             resolvingAgainstBaseURL: false
@@ -59,7 +83,7 @@ struct ReplyService {
             URLQueryItem(name: "oid", value: String(oid)),
             URLQueryItem(name: "type", value: String(type)),
             URLQueryItem(name: "root", value: String(root)),
-            URLQueryItem(name: "pn", value: "1"),
+            URLQueryItem(name: "pn", value: String(page)),
             URLQueryItem(name: "ps", value: "20")
         ]
 
@@ -72,12 +96,18 @@ struct ReplyService {
             throw APIError.serverMessage(response.message)
         }
 
-        return (response.data?.replies ?? []).map { reply in
+        let replies = (response.data?.replies ?? []).map { reply in
             VideoCommentPreviewReply(
                 username: reply.member?.uname ?? "未知用户",
                 message: reply.content?.message ?? ""
             )
         }
+
+        let totalCount = response.data?.page?.count ?? 0
+        let pageSize = response.data?.page?.size ?? 20
+        let currentPage = response.data?.page?.num ?? page
+        let hasMore = currentPage * pageSize < totalCount
+        return ReplyPage(replies: replies, nextPage: hasMore ? currentPage + 1 : nil, hasMore: hasMore)
     }
 
     private func normalizedImageURL(from path: String?) -> URL? {
