@@ -201,14 +201,21 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             window.isHidden = false
             fullscreenWindow = window
             fullscreenController = controller
+            controller.animateIn()
         }
 
         private func dismissLandscapeFullscreen() {
-            fullscreenController?.detachPlayer()
+            guard let controller = fullscreenController, let window = fullscreenWindow else {
+                inlinePlayerViewController?.player = player
+                return
+            }
             fullscreenController = nil
-            fullscreenWindow?.isHidden = true
             fullscreenWindow = nil
-            inlinePlayerViewController?.player = player
+            controller.animateOut { [weak self] in
+                controller.detachPlayer()
+                window.isHidden = true
+                self?.inlinePlayerViewController?.player = self?.player
+            }
         }
 
         private func loadAndPlay(source: PlayableVideoSource) async {
@@ -403,6 +410,7 @@ final class LandscapePlayerFullscreenController: UIViewController {
     private let player: AVPlayer
     private let playerViewController = AVPlayerViewController()
     private var orientation: UIDeviceOrientation
+    private var currentScale: CGFloat = 1
 
     init(player: AVPlayer, orientation: UIDeviceOrientation) {
         self.player = player
@@ -426,7 +434,8 @@ final class LandscapePlayerFullscreenController: UIViewController {
         playerViewController.player = player
         playerViewController.showsPlaybackControls = true
         playerViewController.allowsPictureInPicturePlayback = true
-        playerViewController.videoGravity = .resizeAspect
+        playerViewController.videoGravity = .resizeAspectFill
+        playerViewController.view.backgroundColor = .black
 
         addChild(playerViewController)
         view.addSubview(playerViewController.view)
@@ -442,8 +451,51 @@ final class LandscapePlayerFullscreenController: UIViewController {
     func update(orientation: UIDeviceOrientation) {
         self.orientation = orientation
         guard isViewLoaded else { return }
-        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseInOut]) {
+        currentScale = 1
+        UIView.animate(
+            withDuration: 0.32,
+            delay: 0,
+            usingSpringWithDamping: 0.92,
+            initialSpringVelocity: 0.12,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
             self.layoutPlayerView()
+        }
+    }
+
+    func animateIn() {
+        guard isViewLoaded else { return }
+        currentScale = 0.96
+        view.alpha = 0
+        layoutPlayerView()
+        UIView.animate(
+            withDuration: 0.28,
+            delay: 0,
+            usingSpringWithDamping: 0.9,
+            initialSpringVelocity: 0.16,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            self.currentScale = 1
+            self.view.alpha = 1
+            self.layoutPlayerView()
+        }
+    }
+
+    func animateOut(completion: @escaping () -> Void) {
+        guard isViewLoaded else {
+            completion()
+            return
+        }
+        UIView.animate(
+            withDuration: 0.22,
+            delay: 0,
+            options: [.beginFromCurrentState, .curveEaseInOut, .allowUserInteraction]
+        ) {
+            self.currentScale = 0.97
+            self.view.alpha = 0
+            self.layoutPlayerView()
+        } completion: { _ in
+            completion()
         }
     }
 
@@ -460,6 +512,7 @@ final class LandscapePlayerFullscreenController: UIViewController {
         playerViewController.view.bounds = CGRect(x: 0, y: 0, width: bounds.height, height: bounds.width)
         playerViewController.view.center = CGPoint(x: bounds.midX, y: bounds.midY)
         playerViewController.view.transform = CGAffineTransform(rotationAngle: rotationAngle)
+            .scaledBy(x: currentScale, y: currentScale)
     }
 }
 

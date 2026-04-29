@@ -37,11 +37,13 @@ struct VideoDetailView: View {
     var body: some View {
         GeometryReader { proxy in
             let contentWidth = max(proxy.size.width - pageHorizontalInset * 2, 0)
-            let playerHeight = contentWidth * 9 / 16
+            let playerWidth = proxy.size.width
+            let playerHeight = playerWidth * 9 / 16
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     playerCardSection(height: playerHeight)
-                        .frame(width: contentWidth)
+                        .frame(width: playerWidth)
+                        .padding(.horizontal, -pageHorizontalInset)
 
                     videoInfoSection
                         .frame(width: contentWidth)
