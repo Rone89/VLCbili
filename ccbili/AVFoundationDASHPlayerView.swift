@@ -38,9 +38,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 
     static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
         coordinator.stop()
-        Task { @MainActor in
-            AppOrientationController.lock(.portrait)
-        }
+        AppOrientationController.lock(.portrait)
     }
 
     final class Coordinator {
@@ -194,10 +192,14 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 .first(where: { $0.activationState == .foregroundActive })
             else { return }
 
+            let inlineFrame = inlinePlayerViewController?.view.convert(
+                inlinePlayerViewController?.view.bounds ?? .zero,
+                to: nil
+            )
             let controller = LandscapePlayerFullscreenController(
                 player: player,
                 orientation: orientation,
-                scene: scene
+                sourceFrame: inlineFrame
             )
             inlinePlayerViewController?.player = nil
             let window = UIWindow(windowScene: scene)
@@ -220,9 +222,6 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             controller.animateOut { [weak self] in
                 controller.detachPlayer()
                 window.isHidden = true
-                Task { @MainActor in
-                    AppOrientationController.lock(.portrait, preferred: .portrait, scene: window.windowScene)
-                }
                 self?.inlinePlayerViewController?.player = self?.player
             }
         }
@@ -418,16 +417,16 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 final class LandscapePlayerFullscreenController: UIViewController {
     private let player: AVPlayer
     private let playerViewController = AVPlayerViewController()
-    private weak var scene: UIWindowScene?
+    private let sourceFrame: CGRect?
     private var orientation: UIDeviceOrientation
     private var currentScale: CGFloat = 1
     private var currentAlpha: CGFloat = 1
-    private var isHomeIndicatorHidden = true
+    private var currentCenter: CGPoint?
 
-    init(player: AVPlayer, orientation: UIDeviceOrientation, scene: UIWindowScene?) {
+    init(player: AVPlayer, orientation: UIDeviceOrientation, sourceFrame: CGRect?) {
         self.player = player
         self.orientation = orientation
-        self.scene = scene
+        self.sourceFrame = sourceFrame
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -437,16 +436,12 @@ final class LandscapePlayerFullscreenController: UIViewController {
     }
 
     override var prefersStatusBarHidden: Bool { true }
-    override var prefersHomeIndicatorAutoHidden: Bool { isHomeIndicatorHidden }
-    override var childForHomeIndicatorAutoHidden: UIViewController? { nil }
-    override var childForStatusBarHidden: UIViewController? { nil }
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { interfaceOrientationMask }
-    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { interfaceOrientation }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        setNeedsUpdateOfHomeIndicatorAutoHidden()
 
         playerViewController.player = player
         playerViewController.showsPlaybackControls = true
@@ -460,11 +455,6 @@ final class LandscapePlayerFullscreenController: UIViewController {
         update(orientation: orientation)
     }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        requestSystemOrientationUpdate()
-    }
-
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutPlayerView()
@@ -475,7 +465,7 @@ final class LandscapePlayerFullscreenController: UIViewController {
         guard isViewLoaded else { return }
         currentScale = 1
         currentAlpha = 1
-        requestSystemOrientationUpdate()
+        currentCenter = nil
         UIView.animate(
             withDuration: 0.36,
             delay: 0,
@@ -490,7 +480,8 @@ final class LandscapePlayerFullscreenController: UIViewController {
     func animateIn() {
         guard isViewLoaded else { return }
         currentAlpha = 0
-        currentScale = 0.92
+        currentScale = initialPresentationScale()
+        currentCenter = sourceFrame.map { CGPoint(x: $0.midX, y: $0.midY) }
         layoutPlayerView()
         UIView.animate(
             withDuration: 0.42,
@@ -501,6 +492,7 @@ final class LandscapePlayerFullscreenController: UIViewController {
         ) {
             self.currentAlpha = 1
             self.currentScale = 1
+            self.currentCenter = nil
             self.layoutPlayerView()
         }
     }
@@ -515,8 +507,9 @@ final class LandscapePlayerFullscreenController: UIViewController {
             delay: 0,
             options: [.beginFromCurrentState, .curveEaseInOut, .allowUserInteraction]
         ) {
-            self.currentScale = 0.92
+            self.currentScale = self.initialPresentationScale()
             self.currentAlpha = 0
+            self.currentCenter = self.sourceFrame.map { CGPoint(x: $0.midX, y: $0.midY) }
             self.layoutPlayerView()
         } completion: { _ in
             completion()
@@ -532,28 +525,20 @@ final class LandscapePlayerFullscreenController: UIViewController {
 
     private func layoutPlayerView() {
         let bounds = view.bounds
-        playerViewController.view.bounds = CGRect(origin: .zero, size: bounds.size)
-        playerViewController.view.center = CGPoint(x: bounds.midX, y: bounds.midY)
-        playerViewController.view.transform = CGAffineTransform(scaleX: currentScale, y: currentScale)
+        let rotationAngle: CGFloat = orientation == .landscapeLeft ? .pi / 2 : -.pi / 2
+        playerViewController.view.bounds = CGRect(x: 0, y: 0, width: bounds.height, height: bounds.width)
+        playerViewController.view.center = currentCenter ?? CGPoint(x: bounds.midX, y: bounds.midY)
+        playerViewController.view.transform = CGAffineTransform(rotationAngle: rotationAngle)
+            .scaledBy(x: currentScale, y: currentScale)
         playerViewController.view.alpha = currentAlpha
     }
 
-    private var interfaceOrientation: UIInterfaceOrientation {
-        orientation == .landscapeLeft ? .landscapeRight : .landscapeLeft
-    }
-
-    private var interfaceOrientationMask: UIInterfaceOrientationMask {
-        orientation == .landscapeLeft ? .landscapeRight : .landscapeLeft
-    }
-
-    @MainActor
-    private func requestSystemOrientationUpdate() {
-        isHomeIndicatorHidden = true
-        setNeedsUpdateOfHomeIndicatorAutoHidden()
-        setNeedsUpdateOfSupportedInterfaceOrientations()
-        playerViewController.setNeedsUpdateOfHomeIndicatorAutoHidden()
-        playerViewController.setNeedsUpdateOfSupportedInterfaceOrientations()
-        AppOrientationController.lock(interfaceOrientationMask, preferred: interfaceOrientation, scene: scene)
+    private func initialPresentationScale() -> CGFloat {
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return 0.92 }
+        let inlineHeight = bounds.width * 9 / 16
+        let fullscreenHeight = bounds.width
+        return max(0.2, min(1, inlineHeight / fullscreenHeight))
     }
 }
 
