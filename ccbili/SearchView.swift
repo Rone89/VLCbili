@@ -1,4 +1,8 @@
-﻿import SwiftUI
+//  SearchView.swift
+//  ccbili
+//
+
+import SwiftUI
 
 struct SearchView: View {
     @State private var viewModel = SearchViewModel()
@@ -21,7 +25,7 @@ struct SearchView: View {
 
                             Spacer()
 
-                            Button("清空") {
+                Button("清空") {
                                 viewModel.clearHistory()
                             }
                             .font(.subheadline)
@@ -36,7 +40,7 @@ struct SearchView: View {
                         ProgressView()
                         Text("正在搜索...")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 6)
@@ -64,7 +68,7 @@ struct SearchView: View {
                         ContentUnavailableView(
                             "暂无搜索结果",
                             systemImage: "magnifyingglass",
-                            description: Text("试试更换关键词")
+                            description: Text("试更换关键词")
                         )
                         .frame(maxWidth: .infinity)
                         .padding(.top, 16)
@@ -76,15 +80,13 @@ struct SearchView: View {
                                 } label: {
                                     VideoListRowView(
                                         title: item.title,
-                                        subtitle: item.subtitle,
-                                        accessoryText: item.bvid,
+                                subtitle: item.subtitle,
+                                accessoryText: item.bvid,
                                         coverURL: item.coverURL
                                     )
-                                }
-                                .buttonStyle(.plain)
-                            }
+                                }.buttonStyle(.plain)
+                }
                         }
-                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -92,8 +94,8 @@ struct SearchView: View {
             .padding(.bottom, 16)
         }
         .background(Color(.systemBackground))
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle("搜索")
+        .navigationBarTitleDisplayMode(.large)
         .onSubmit(of: .text) {
             Task {
                 await viewModel.search()
@@ -127,7 +129,7 @@ struct SearchView: View {
     private var historyTagsView: some View {
         FlexibleTagFlowView(tags: viewModel.searchHistory) { history in
             Button {
-                viewModel.applyHistory(history)
+                viewModel.aplyHistory(history)
                 Task {
                     await viewModel.search()
                 }
@@ -135,8 +137,8 @@ struct SearchView: View {
                 Text(history)
                     .font(.subheadline)
                     .foregroundStyle(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                     .background(.thinMaterial, in: Capsule())
             }
             .buttonStyle(.plain)
@@ -189,4 +191,3 @@ private struct FlexibleTagFlowView: View {
         return rows
     }
 }
-
