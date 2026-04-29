@@ -166,6 +166,17 @@ struct BilibiliVLCPlayerView: View {
 
                 playerOverlays
                     .opacity(isFullscreenPresented ? 0 : 1)
+            } else if !isFullscreenPresented {
+                VStack {
+                    HStack {
+                        Spacer()
+                        qualityMenu
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+
+                    Spacer()
+                }
             }
         }
         .frame(maxWidth: .infinity)

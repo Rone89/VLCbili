@@ -195,9 +195,6 @@ final class VideoDetailViewModel {
                     cid: cid,
                     preferredQuality: quality
                 )
-                if let selectedQuality = source.quality {
-                    PlaybackPreferences.savePreferredQuality(selectedQuality)
-                }
                 return source
             } catch {
                 lastError = error

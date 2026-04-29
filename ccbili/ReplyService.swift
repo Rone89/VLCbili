@@ -49,6 +49,37 @@ struct ReplyService {
         return comments
     }
 
+    func fetchReplyReplies(oid: Int, root: Int, type: Int = 1) async throws -> [VideoCommentPreviewReply] {
+        var components = URLComponents(
+            url: AppConfig.apiBaseURL.appending(path: "/x/v2/reply/reply"),
+            resolvingAgainstBaseURL: false
+        )
+
+        components?.queryItems = [
+            URLQueryItem(name: "oid", value: String(oid)),
+            URLQueryItem(name: "type", value: String(type)),
+            URLQueryItem(name: "root", value: String(root)),
+            URLQueryItem(name: "pn", value: "1"),
+            URLQueryItem(name: "ps", value: "20")
+        ]
+
+        guard let url = components?.url else {
+            throw APIError.invalidURL
+        }
+
+        let response = try await APIClient.shared.get(url: url, as: ReplyListResponse.self)
+        guard response.code == 0 else {
+            throw APIError.serverMessage(response.message)
+        }
+
+        return (response.data?.replies ?? []).map { reply in
+            VideoCommentPreviewReply(
+                username: reply.member?.uname ?? "未知用户",
+                message: reply.content?.message ?? ""
+            )
+        }
+    }
+
     private func normalizedImageURL(from path: String?) -> URL? {
         guard let path, !path.isEmpty else {
             return nil

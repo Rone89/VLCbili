@@ -24,6 +24,8 @@ struct VideoDetailView: View {
     @State private var isVideoPlaying = false
     @State private var restoredPlaybackPosition: Double?
     @State private var lastSavedPlaybackSecond = 0
+    @State private var expandedCommentReplies: [String: [VideoCommentPreviewReply]] = [:]
+    @State private var loadingReplyCommentIDs: Set<String> = []
 
     private let biliPink = Color(red: 251 / 255, green: 114 / 255, blue: 153 / 255)
     private let replyService = ReplyService()
@@ -804,13 +806,30 @@ struct VideoDetailView: View {
                                     Spacer()
 
                                     if comment.replyCount > 0 {
-                                        Button("查看 \(comment.replyCount) 条回复") {
+                                        Button(loadingReplyCommentIDs.contains(comment.id) ? "正在加载..." : "查看 \(comment.replyCount) 条回复") {
+                                            Task {
+                                                await loadReplies(for: comment)
+                                            }
                                         }
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     }
                                 }
                                 .padding(.top, 2)
+
+                                if let expandedReplies = expandedCommentReplies[comment.id], !expandedReplies.isEmpty {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ForEach(expandedReplies, id: \.self) { reply in
+                                            Text("\(reply.username)：\(reply.message)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(3)
+                                        }
+                                    }
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                }
                             }
 
                             Spacer()
@@ -1073,6 +1092,25 @@ struct VideoDetailView: View {
         guard abs(currentSecond - lastSavedPlaybackSecond) >= 5 else { return }
         lastSavedPlaybackSecond = currentSecond
         VideoPlaybackHistoryStore.save(videoID: viewModel.playbackItem.id, position: playbackPosition)
+    }
+
+    private func loadReplies(for comment: VideoComment) async {
+        guard let aid = viewModel.playbackItem.aid, let root = Int(comment.id) else { return }
+        if expandedCommentReplies[comment.id] != nil {
+            expandedCommentReplies[comment.id] = nil
+            return
+        }
+        loadingReplyCommentIDs.insert(comment.id)
+        defer { loadingReplyCommentIDs.remove(comment.id) }
+
+        do {
+            let replies = try await replyService.fetchReplyReplies(oid: aid, root: root)
+            expandedCommentReplies[comment.id] = replies
+        } catch {
+            expandedCommentReplies[comment.id] = [
+                VideoCommentPreviewReply(username: "系统提示", message: "回复加载失败：\(error.localizedDescription)")
+            ]
+        }
     }
 
     private func statsText(_ value: Int?, fallback: String) -> String {
