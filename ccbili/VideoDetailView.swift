@@ -108,12 +108,6 @@ struct VideoDetailView: View {
         videoHeaderSection(height: height)
             .frame(maxWidth: .infinity)
             .frame(height: height)
-            .background(Color.black)
-            .clipShape(RoundedRectangle(cornerRadius: detailCardCornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: detailCardCornerRadius, style: .continuous)
-                    .strokeBorder(Color(.separator).opacity(0.08), lineWidth: 0.5)
-            }
     }
 
     @ViewBuilder
@@ -132,7 +126,6 @@ struct VideoDetailView: View {
             )
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
-                .background(.black)
         } else {
             unavailablePlayerPlaceholder(height: height)
         }

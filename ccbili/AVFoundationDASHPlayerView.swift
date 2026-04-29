@@ -21,7 +21,6 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         controller.entersFullScreenWhenPlaybackBegins = false
         controller.exitsFullScreenWhenPlaybackEnds = true
         controller.videoGravity = .resizeAspectFill
-        AppOrientationController.lock(.allButUpsideDown)
         context.coordinator.play(source: source)
         return controller
     }
