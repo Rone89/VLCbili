@@ -152,18 +152,20 @@ struct BilibiliVLCPlayerView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
-            Color.black.opacity(0.001)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    commandCenter.togglePlay()
-                    showControlsTemporarily()
-                }
-                .onTapGesture(count: 1) {
-                    toggleControlsVisibility()
-                }
+            if !currentSource.isDASHSeparated {
+                Color.black.opacity(0.001)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        commandCenter.togglePlay()
+                        showControlsTemporarily()
+                    }
+                    .onTapGesture(count: 1) {
+                        toggleControlsVisibility()
+                    }
 
-            playerOverlays
-                .opacity(isFullscreenPresented ? 0 : 1)
+                playerOverlays
+                    .opacity(isFullscreenPresented ? 0 : 1)
+            }
         }
         .frame(maxWidth: .infinity)
     }

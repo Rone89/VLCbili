@@ -21,7 +21,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.entersFullScreenWhenPlaybackBegins = false
         controller.exitsFullScreenWhenPlaybackEnds = true
-        controller.videoGravity = .resizeAspectFill
+        controller.videoGravity = .resizeAspect
         context.coordinator.play(source: source)
         return controller
     }
@@ -32,7 +32,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         }
         context.coordinator.attachInlineController(controller)
         controller.showsPlaybackControls = true
-        controller.videoGravity = .resizeAspectFill
+        controller.videoGravity = .resizeAspect
         context.coordinator.play(source: source)
     }
 
@@ -192,7 +192,15 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 .first(where: { $0.activationState == .foregroundActive })
             else { return }
 
-            let controller = LandscapePlayerFullscreenController(player: player, orientation: orientation)
+            let inlineFrame = inlinePlayerViewController?.view.convert(
+                inlinePlayerViewController?.view.bounds ?? .zero,
+                to: nil
+            )
+            let controller = LandscapePlayerFullscreenController(
+                player: player,
+                orientation: orientation,
+                sourceFrame: inlineFrame
+            )
             inlinePlayerViewController?.player = nil
             let window = UIWindow(windowScene: scene)
             window.windowLevel = .alert + 2
@@ -409,12 +417,16 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 final class LandscapePlayerFullscreenController: UIViewController {
     private let player: AVPlayer
     private let playerViewController = AVPlayerViewController()
+    private let sourceFrame: CGRect?
     private var orientation: UIDeviceOrientation
     private var currentScale: CGFloat = 1
+    private var currentAlpha: CGFloat = 1
+    private var currentCenter: CGPoint?
 
-    init(player: AVPlayer, orientation: UIDeviceOrientation) {
+    init(player: AVPlayer, orientation: UIDeviceOrientation, sourceFrame: CGRect?) {
         self.player = player
         self.orientation = orientation
+        self.sourceFrame = sourceFrame
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -434,7 +446,7 @@ final class LandscapePlayerFullscreenController: UIViewController {
         playerViewController.player = player
         playerViewController.showsPlaybackControls = true
         playerViewController.allowsPictureInPicturePlayback = true
-        playerViewController.videoGravity = .resizeAspectFill
+        playerViewController.videoGravity = .resizeAspect
         playerViewController.view.backgroundColor = .black
 
         addChild(playerViewController)
@@ -452,11 +464,13 @@ final class LandscapePlayerFullscreenController: UIViewController {
         self.orientation = orientation
         guard isViewLoaded else { return }
         currentScale = 1
+        currentAlpha = 1
+        currentCenter = nil
         UIView.animate(
-            withDuration: 0.32,
+            withDuration: 0.36,
             delay: 0,
-            usingSpringWithDamping: 0.92,
-            initialSpringVelocity: 0.12,
+            usingSpringWithDamping: 0.86,
+            initialSpringVelocity: 0.18,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
             self.layoutPlayerView()
@@ -465,18 +479,20 @@ final class LandscapePlayerFullscreenController: UIViewController {
 
     func animateIn() {
         guard isViewLoaded else { return }
-        currentScale = 0.96
-        view.alpha = 0
+        currentAlpha = 0
+        currentScale = initialPresentationScale()
+        currentCenter = sourceFrame.map { CGPoint(x: $0.midX, y: $0.midY) }
         layoutPlayerView()
         UIView.animate(
-            withDuration: 0.28,
+            withDuration: 0.42,
             delay: 0,
-            usingSpringWithDamping: 0.9,
-            initialSpringVelocity: 0.16,
+            usingSpringWithDamping: 0.84,
+            initialSpringVelocity: 0.2,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
+            self.currentAlpha = 1
             self.currentScale = 1
-            self.view.alpha = 1
+            self.currentCenter = nil
             self.layoutPlayerView()
         }
     }
@@ -487,12 +503,13 @@ final class LandscapePlayerFullscreenController: UIViewController {
             return
         }
         UIView.animate(
-            withDuration: 0.22,
+            withDuration: 0.28,
             delay: 0,
             options: [.beginFromCurrentState, .curveEaseInOut, .allowUserInteraction]
         ) {
-            self.currentScale = 0.97
-            self.view.alpha = 0
+            self.currentScale = self.initialPresentationScale()
+            self.currentAlpha = 0
+            self.currentCenter = self.sourceFrame.map { CGPoint(x: $0.midX, y: $0.midY) }
             self.layoutPlayerView()
         } completion: { _ in
             completion()
@@ -510,9 +527,18 @@ final class LandscapePlayerFullscreenController: UIViewController {
         let bounds = view.bounds
         let rotationAngle: CGFloat = orientation == .landscapeLeft ? .pi / 2 : -.pi / 2
         playerViewController.view.bounds = CGRect(x: 0, y: 0, width: bounds.height, height: bounds.width)
-        playerViewController.view.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        playerViewController.view.center = currentCenter ?? CGPoint(x: bounds.midX, y: bounds.midY)
         playerViewController.view.transform = CGAffineTransform(rotationAngle: rotationAngle)
             .scaledBy(x: currentScale, y: currentScale)
+        playerViewController.view.alpha = currentAlpha
+    }
+
+    private func initialPresentationScale() -> CGFloat {
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return 0.92 }
+        let inlineHeight = bounds.width * 9 / 16
+        let fullscreenHeight = bounds.width
+        return max(0.2, min(1, inlineHeight / fullscreenHeight))
     }
 }
 
