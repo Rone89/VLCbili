@@ -22,9 +22,7 @@ struct VideoDetailView: View {
     @State private var coinErrorMessage: String?
     @State private var selectedTab: DetailTab = .intro
     @State private var commentSortMode: CommentSortMode = .hot
-    @State private var isVideoPlaying = false
     @State private var videoAspectRatio: CGFloat = 16 / 9
-    @State private var playerScrollMinY: CGFloat = 0
     @State private var restoredPlaybackPosition: Double?
     @State private var lastSavedPlaybackSecond = 0
     @State private var expandedCommentReplies: [String: [VideoCommentPreviewReply]] = [:]
@@ -35,7 +33,6 @@ struct VideoDetailView: View {
     private let detailCardCornerRadius: CGFloat = 20
     private let cardCornerRadius: CGFloat = 18
     private let pageHorizontalInset: CGFloat = 16
-    private let playerPinnedTopOffset: CGFloat = 12
     private let titleHorizontalInset: CGFloat = 16
 
     init(item: VideoItem) {
@@ -47,44 +44,30 @@ struct VideoDetailView: View {
             let contentWidth = max(proxy.size.width - pageHorizontalInset * 2, 0)
             let playerWidth = proxy.size.width
             let playerHeight = min(playerWidth / videoAspectRatio, proxy.size.height * 0.7)
-            ZStack(alignment: .top) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        playerPlaceholder(height: playerHeight)
-                            .frame(width: playerWidth)
-                            .padding(.horizontal, -pageHorizontalInset)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    playerCardSection(height: playerHeight)
+                        .frame(width: playerWidth)
+                        .padding(.horizontal, -pageHorizontalInset)
 
-                        videoInfoSection
-                            .frame(width: contentWidth)
+                    videoInfoSection
+                        .frame(width: contentWidth)
 
-                        errorSection
-                            .frame(width: contentWidth)
+                    errorSection
+                        .frame(width: contentWidth)
 
-                        tabSection
-                            .frame(width: contentWidth)
+                    tabSection
+                        .frame(width: contentWidth)
 
-                        animatedTabContentSection
-                            .frame(width: contentWidth)
-                    }
-                    .padding(.horizontal, pageHorizontalInset)
-                    .padding(.top, 12)
-                    .padding(.bottom, 24)
-                    .frame(maxWidth: .infinity, alignment: .top)
+                    animatedTabContentSection
+                        .frame(width: contentWidth)
                 }
-                .coordinateSpace(name: "videoDetailScroll")
-                .onPreferenceChange(VideoDetailPlayerMinYPreferenceKey.self) { value in
-                    playerScrollMinY = value
-                }
-
-                playerCardSection(height: playerHeight)
-                    .frame(width: playerWidth)
-                    .offset(y: playerOverlayY)
-                    .opacity(shouldShowPlayerOverlay(playerHeight: playerHeight) ? 1 : 0)
-                    .allowsHitTesting(shouldShowPlayerOverlay(playerHeight: playerHeight))
-                    .zIndex(10)
+                .padding(.horizontal, pageHorizontalInset)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
             .background(Color(.systemGroupedBackground))
-            .animation(.spring(response: 0.32, dampingFraction: 0.88), value: isVideoPlaying)
         }
         .navigationTitle("视频详情")
         .navigationBarTitleDisplayMode(.inline)
@@ -141,27 +124,6 @@ struct VideoDetailView: View {
             .frame(height: height)
     }
 
-    private func playerPlaceholder(height: CGFloat) -> some View {
-        Color.clear
-            .frame(height: height)
-            .background(
-                GeometryReader { playerProxy in
-                    Color.clear.preference(
-                        key: VideoDetailPlayerMinYPreferenceKey.self,
-                        value: playerProxy.frame(in: .named("videoDetailScroll")).minY
-                    )
-                }
-            )
-    }
-
-    private var playerOverlayY: CGFloat {
-        isVideoPlaying ? max(playerPinnedTopOffset, playerScrollMinY) : playerScrollMinY
-    }
-
-    private func shouldShowPlayerOverlay(playerHeight: CGFloat) -> Bool {
-        isVideoPlaying || playerScrollMinY + playerHeight > 0
-    }
-
     @ViewBuilder
     private func videoHeaderSection(height: CGFloat) -> some View {
         if let source = viewModel.playbackSource {
@@ -172,9 +134,6 @@ struct VideoDetailView: View {
                 onPositionChange: { position in
                     playbackPosition = position
                     savePlaybackHistoryIfNeeded()
-                },
-                onPlaybackStateChange: { isPlaying in
-                    isVideoPlaying = isPlaying
                 },
                 onVideoSizeChange: { videoSize in
                     updateVideoAspectRatio(videoSize)
@@ -1250,14 +1209,6 @@ private enum DetailTab: Hashable {
     case intro
     case comments
     case related
-}
-
-private struct VideoDetailPlayerMinYPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 
 private enum CommentSortMode: CaseIterable {
