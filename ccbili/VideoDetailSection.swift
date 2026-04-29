@@ -1,6 +1,7 @@
 import Foundation
 
 struct VideoAuthor: Hashable {
+    let mid: Int?
     let name: String
     let followerText: String
     let avatarURL: URL?

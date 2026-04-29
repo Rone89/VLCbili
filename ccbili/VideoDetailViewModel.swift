@@ -309,6 +309,7 @@ final class VideoDetailViewModel {
     private func buildAuthor(mid: Int?, fallbackName: String, fallbackAvatarURL: URL?) async -> VideoAuthor {
         guard let mid else {
             return VideoAuthor(
+                mid: nil,
                 name: fallbackName,
                 followerText: "粉丝数待获取",
                 avatarURL: fallbackAvatarURL
@@ -341,12 +342,14 @@ final class VideoDetailViewModel {
             let face = normalizedImageURL(from: response.data?.card?.face) ?? fallbackAvatarURL
 
             return VideoAuthor(
+                mid: mid,
                 name: fallbackName,
                 followerText: "粉丝 \(formattedCount(follower))",
                 avatarURL: face
             )
         } catch {
             return VideoAuthor(
+                mid: mid,
                 name: fallbackName,
                 followerText: "粉丝数获取失败",
                 avatarURL: fallbackAvatarURL

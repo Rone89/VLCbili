@@ -55,6 +55,7 @@ struct VideoListRowView: View {
                     }
                 }
             )
+            .frame(maxWidth: .infinity)
             .aspectRatio(16 / 9, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(alignment: .bottomLeading) {
@@ -89,7 +90,9 @@ struct VideoListRowView: View {
                 }
             }
             .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .contentShape(Rectangle())
     }
 }

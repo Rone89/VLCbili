@@ -350,17 +350,21 @@ struct VideoDetailView: View {
 
     private var authorSummaryRow: some View {
         HStack(spacing: 12) {
-            authorAvatarView
-                .frame(width: 42, height: 42)
-                .clipShape(Circle())
+            authorProfileLink {
+                authorAvatarView
+                    .frame(width: 42, height: 42)
+                    .clipShape(Circle())
+            }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(viewModel.author?.name ?? viewModel.playbackItem.subtitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(viewModel.author?.followerText ?? "粉丝数待接入")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            authorProfileLink {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(viewModel.author?.name ?? viewModel.playbackItem.subtitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(viewModel.author?.followerText ?? "粉丝数待接入")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()
@@ -493,40 +497,44 @@ struct VideoDetailView: View {
         Group {
             if let author = viewModel.author {
                 HStack(spacing: 12) {
-                    AsyncImage(url: author.avatarURL) { phase in
-                        switch phase {
-                        case .empty:
-                            Circle()
-                                .fill(Color(.quaternarySystemFill))
-                                .overlay {
-                                    ProgressView()
-                                }
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .scaledToFill()
-                        case .failure:
-                            Circle()
-                                .fill(Color(.quaternarySystemFill))
-                                .overlay {
-                                    Image(systemName: "person.fill")
-                                        .foregroundStyle(.secondary)
-                                }
-                        @unknown default:
-                            Circle()
-                                .fill(Color(.quaternarySystemFill))
+                    authorProfileLink {
+                        AsyncImage(url: author.avatarURL) { phase in
+                            switch phase {
+                            case .empty:
+                                Circle()
+                                    .fill(Color(.quaternarySystemFill))
+                                    .overlay {
+                                        ProgressView()
+                                    }
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            case .failure:
+                                Circle()
+                                    .fill(Color(.quaternarySystemFill))
+                                    .overlay {
+                                        Image(systemName: "person.fill")
+                                            .foregroundStyle(.secondary)
+                                    }
+                            @unknown default:
+                                Circle()
+                                    .fill(Color(.quaternarySystemFill))
+                            }
                         }
+                        .frame(width: 46, height: 46)
+                        .clipShape(Circle())
                     }
-                    .frame(width: 46, height: 46)
-                    .clipShape(Circle())
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(author.name)
-                            .font(.subheadline.weight(.semibold))
+                    authorProfileLink {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(author.name)
+                                .font(.subheadline.weight(.semibold))
 
-                        Text(author.followerText)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            Text(author.followerText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Spacer()
@@ -1239,6 +1247,20 @@ struct VideoDetailView: View {
         } catch {
             viewModel.comments = []
             commentErrorMessage = "评论加载失败：\(error.localizedDescription)"
+        }
+    }
+
+    @ViewBuilder
+    private func authorProfileLink<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if let author = viewModel.author, let mid = author.mid {
+            NavigationLink {
+                UserProfileView(mid: mid, username: author.name)
+            } label: {
+                content()
+            }
+            .buttonStyle(.plain)
+        } else {
+            content()
         }
     }
 
