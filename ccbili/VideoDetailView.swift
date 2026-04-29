@@ -22,6 +22,7 @@ struct VideoDetailView: View {
     @State private var selectedTab: DetailTab = .intro
     @State private var commentSortMode: CommentSortMode = .hot
     @State private var isVideoPlaying = false
+    @State private var videoAspectRatio: CGFloat = 16 / 9
     @State private var restoredPlaybackPosition: Double?
     @State private var lastSavedPlaybackSecond = 0
     @State private var expandedCommentReplies: [String: [VideoCommentPreviewReply]] = [:]
@@ -42,7 +43,7 @@ struct VideoDetailView: View {
         GeometryReader { proxy in
             let contentWidth = max(proxy.size.width - pageHorizontalInset * 2, 0)
             let playerWidth = proxy.size.width
-            let playerHeight = playerWidth * 9 / 16
+            let playerHeight = min(playerWidth / videoAspectRatio, proxy.size.height * 0.7)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     playerCardSection(height: playerHeight)
@@ -137,6 +138,9 @@ struct VideoDetailView: View {
                 },
                 onPlaybackStateChange: { isPlaying in
                     isVideoPlaying = isPlaying
+                },
+                onVideoSizeChange: { videoSize in
+                    updateVideoAspectRatio(videoSize)
                 }
             )
                 .frame(maxWidth: .infinity)
@@ -275,6 +279,16 @@ struct VideoDetailView: View {
                 endPoint: .bottom
             )
         )
+    }
+
+    private func updateVideoAspectRatio(_ videoSize: CGSize) {
+        guard videoSize.width > 0, videoSize.height > 0 else {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            videoAspectRatio = videoSize.width / videoSize.height
+        }
     }
 
     // MARK: - Info

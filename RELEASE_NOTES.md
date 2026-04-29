@@ -1,10 +1,9 @@
 ﻿## 本版本修复
 
-- 为本地 HLS 代理补充 `NSAllowsLocalNetworking`，避免 AVPlayer 访问 `127.0.0.1` HLS 分片被 ATS/本地网络策略拦截。
-- 播放诊断从 3 行扩展到 8 行，并把 HLS 诊断换行显示，避免 `manifest/proxy` 信息被截断。
-- 增加 AVPlayerItem 状态诊断：显示 `player=ready/failed/unknown` 以及失败原因。
-- 保留 HLS manifest 与 proxy 请求诊断：`manifest=v.../a...`、`proxy#... status req/res bytes`。
+- 视频详情页播放器在 `AVPlayerItem.status == .readyToPlay` 后读取视频轨道原始尺寸，并按真实宽高比自动调整窗口高度。
+- 播放器高度限制为屏幕高度的 70%，避免竖屏视频撑满页面。
+- GitHub Actions 支持手动填写 `release_tag` 生成未签名 IPA 并创建 GitHub Release。
 
 ## 说明
 
-请安装后重新测试 1080P+/4K，并把完整黄色诊断发我。重点看是否有 `proxy#`，以及 `player=` 是 ready、failed 还是 unknown。
+未签名 IPA 会作为 Release 附件上传，适合后续自行签名或侧载测试。

@@ -21,6 +21,7 @@ struct BilibiliVLCPlayerView: View {
     private let onPositionChange: (Double) -> Void
     private let onPlaybackStateChange: (Bool) -> Void
     private let onFullscreenRequest: (() -> Void)?
+    private let onVideoSizeChange: (CGSize) -> Void
 
     @StateObject private var playbackState = BilibiliVLCPlaybackState()
     @StateObject private var commandCenter = BilibiliVLCCommandCenter()
@@ -50,6 +51,7 @@ struct BilibiliVLCPlayerView: View {
         initialPosition: Double? = nil,
         onPositionChange: @escaping (Double) -> Void = { _ in },
         onPlaybackStateChange: @escaping (Bool) -> Void = { _ in },
+        onVideoSizeChange: @escaping (CGSize) -> Void = { _ in },
         onFullscreenRequest: (() -> Void)? = nil
     ) {
         self.source = source
@@ -57,6 +59,7 @@ struct BilibiliVLCPlayerView: View {
         self.initialPosition = initialPosition
         self.onPositionChange = onPositionChange
         self.onPlaybackStateChange = onPlaybackStateChange
+        self.onVideoSizeChange = onVideoSizeChange
         self.onFullscreenRequest = onFullscreenRequest
         _currentSource = State(initialValue: source)
         _pendingSeekPosition = State(initialValue: initialPosition)
@@ -188,7 +191,8 @@ struct BilibiliVLCPlayerView: View {
                 AVFoundationDASHPlayerView(
                     source: currentSource,
                     playbackState: playbackState,
-                    commandCenter: commandCenter
+                    commandCenter: commandCenter,
+                    onVideoSizeChange: onVideoSizeChange
                 )
             } else {
                 BilibiliVLCVideoSurface(

@@ -7,9 +7,26 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
     let source: PlayableVideoSource
     let playbackState: BilibiliVLCPlaybackState
     let commandCenter: BilibiliVLCCommandCenter
+    let onVideoSizeChange: (CGSize) -> Void
+
+    init(
+        source: PlayableVideoSource,
+        playbackState: BilibiliVLCPlaybackState,
+        commandCenter: BilibiliVLCCommandCenter,
+        onVideoSizeChange: @escaping (CGSize) -> Void = { _ in }
+    ) {
+        self.source = source
+        self.playbackState = playbackState
+        self.commandCenter = commandCenter
+        self.onVideoSizeChange = onVideoSizeChange
+    }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(playbackState: playbackState, commandCenter: commandCenter)
+        Coordinator(
+            playbackState: playbackState,
+            commandCenter: commandCenter,
+            onVideoSizeChange: onVideoSizeChange
+        )
     }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
@@ -27,6 +44,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        context.coordinator.onVideoSizeChange = onVideoSizeChange
         if controller.player !== context.coordinator.player {
             controller.player = context.coordinator.player
         }
@@ -43,6 +61,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 
     final class Coordinator {
         let player = AVPlayer()
+        var onVideoSizeChange: (CGSize) -> Void
         private weak var playbackState: BilibiliVLCPlaybackState?
         private weak var commandCenter: BilibiliVLCCommandCenter?
         private var currentSource: PlayableVideoSource?
@@ -55,9 +74,14 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private var fullscreenWindow: UIWindow?
         private var fullscreenController: LandscapePlayerFullscreenController?
 
-        init(playbackState: BilibiliVLCPlaybackState, commandCenter: BilibiliVLCCommandCenter) {
+        init(
+            playbackState: BilibiliVLCPlaybackState,
+            commandCenter: BilibiliVLCCommandCenter,
+            onVideoSizeChange: @escaping (CGSize) -> Void
+        ) {
             self.playbackState = playbackState
             self.commandCenter = commandCenter
+            self.onVideoSizeChange = onVideoSizeChange
             bindCommands()
             startOrientationObservation()
         }
@@ -261,6 +285,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     self.player.automaticallyWaitsToMinimizeStalling = false
+                    self.observe(item: item)
                     self.player.replaceCurrentItem(with: item)
                     self.addTimeObserver()
                     self.updatePlaybackState()
@@ -292,6 +317,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 switch item.status {
                 case .readyToPlay:
                     HLSPlaybackDiagnostics.shared.recordPlayerStatus("ready")
+                    self.updateVideoSize(for: item)
                     if self.shouldAutoplay {
                         self.player.play()
                     }
@@ -303,6 +329,25 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 @unknown default:
                     HLSPlaybackDiagnostics.shared.recordPlayerStatus("other")
                 }
+            }
+        }
+
+        private func updateVideoSize(for item: AVPlayerItem) {
+            guard let videoTrack = item.tracks
+                .compactMap({ $0.assetTrack })
+                .first(where: { $0.mediaType == .video }) else {
+                return
+            }
+
+            let transformedSize = videoTrack.naturalSize.applying(videoTrack.preferredTransform)
+            let videoSize = CGSize(width: abs(transformedSize.width), height: abs(transformedSize.height))
+
+            guard videoSize.width > 0, videoSize.height > 0 else {
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.onVideoSizeChange(videoSize)
             }
         }
 
