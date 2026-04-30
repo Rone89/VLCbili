@@ -36,6 +36,29 @@ enum AppOrientationController {
         }
     }
 
+    static func lockForPlayerFullscreen(
+        _ orientations: UIInterfaceOrientationMask,
+        scene: UIWindowScene? = nil,
+        completion: @escaping () -> Void
+    ) {
+        isPlayerFullscreenActive = true
+        supportedOrientations = orientations
+        let targetScene = targetScene(scene)
+        requestSupportedOrientationUpdates(in: targetScene)
+
+        if #available(iOS 16.0, *) {
+            targetScene?.requestGeometryUpdate(.iOS(interfaceOrientations: orientations))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                completion()
+            }
+        } else {
+            UIViewController.attemptRotationToDeviceOrientation()
+            DispatchQueue.main.async {
+                completion()
+            }
+        }
+    }
+
     static func preparePlayerFullscreen(scene: UIWindowScene? = nil) {
         isPlayerFullscreenActive = true
         allow(playerFullscreenOrientations, scene: scene)
