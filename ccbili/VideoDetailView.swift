@@ -620,7 +620,13 @@ struct VideoDetailView: View {
             })
             .accessibilityLabel(statsText(viewModel.stats.shares, fallback: "分享"))
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
+        .background(
+            Color(.tertiarySystemGroupedBackground),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
     }
 
     // MARK: - Errors
@@ -1077,14 +1083,6 @@ struct VideoDetailView: View {
         .foregroundStyle(tint)
         .frame(maxWidth: .infinity)
         .frame(height: 48)
-        .background(
-            Color(.secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .strokeBorder(Color(.separator).opacity(0.08), lineWidth: 0.5)
-        }
         .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 
