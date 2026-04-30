@@ -90,11 +90,17 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private var overlayConstraints: [NSLayoutConstraint] = []
         private var playbackRateBeforeFullscreen: Float = 1
         private var wasPlayingBeforeFullscreen = false
+        private var isHoldingPlaybackStateForFullscreenTransition = false
+        private var fullscreenPlaybackTransitionGeneration = 0
         private var isFullscreenActive = false
         private var longPressPlaybackRate: Float = 1
         private var wasPlayingBeforeLongPress = false
         private var panStartPosition: Double = 0
         private var panStartBrightness: CGFloat = 0
+        private var pendingOverlayVideoBoundsUpdate: (videoBounds: CGRect, isFullscreen: Bool)?
+        private var isOverlayVideoBoundsUpdateScheduled = false
+        private var lastAppliedOverlayVideoBounds: CGRect = .null
+        private var lastAppliedOverlayFullscreenState = false
         private lazy var volumeController = PlayerSystemVolumeController()
 
         init(
@@ -121,6 +127,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             guard source != currentSource else { return }
             currentSource = source
             shouldAutoplay = true
+            isHoldingPlaybackStateForFullscreenTransition = false
             loadTask?.cancel()
             statusObserver?.invalidate()
             statusObserver = nil
@@ -145,6 +152,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             player.pause()
             player.replaceCurrentItem(with: nil)
             currentSource = nil
+            isHoldingPlaybackStateForFullscreenTransition = false
         }
 
         func attachInlineController(_ controller: AVPlayerViewController) {
@@ -214,17 +222,22 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             danmakuHostingController?.view.removeFromSuperview()
             danmakuHostingController?.removeFromParent()
             danmakuHostingController = nil
+            pendingOverlayVideoBoundsUpdate = nil
+            isOverlayVideoBoundsUpdateScheduled = false
+            lastAppliedOverlayVideoBounds = .null
+            lastAppliedOverlayFullscreenState = false
         }
 
         private func bindCommands() {
             commandCenter?.togglePlayHandler = { [weak self] in
                 guard let self else { return }
                 if self.player.timeControlStatus == .playing {
+                    self.isHoldingPlaybackStateForFullscreenTransition = false
                     self.player.pause()
                     self.shouldAutoplay = false
                 } else {
                     self.shouldAutoplay = true
-                    self.player.play()
+                    self.player.playImmediately(atRate: max(self.playbackRateBeforeFullscreen, 1))
                 }
                 self.updatePlaybackState()
             }
@@ -232,12 +245,13 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             commandCenter?.playHandler = { [weak self] in
                 guard let self else { return }
                 self.shouldAutoplay = true
-                self.player.play()
+                self.player.playImmediately(atRate: max(self.playbackRateBeforeFullscreen, 1))
                 self.updatePlaybackState()
             }
 
             commandCenter?.pauseHandler = { [weak self] in
                 guard let self else { return }
+                self.isHoldingPlaybackStateForFullscreenTransition = false
                 self.shouldAutoplay = false
                 self.player.pause()
                 self.updatePlaybackState()
@@ -336,6 +350,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             controller.view.backgroundColor = .black
             automaticFullscreenController = controller
             inlinePlayerViewController.player = nil
+            keepPlaybackRunningDuringFullscreenTransition()
 
             AppOrientationController.lock(
                 orientationMask,
@@ -368,6 +383,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             }
             isAutomaticFullscreenTransitioning = true
             controller.onDismiss = nil
+            keepPlaybackRunningDuringFullscreenTransition()
 
             controller.dismiss(animated: animated) { [weak self, weak controller] in
                 guard let self else { return }
@@ -411,8 +427,40 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         }
 
         private func capturePlaybackBeforeFullscreenTransition() {
-            playbackRateBeforeFullscreen = player.rate > 0 ? player.rate : 1
-            wasPlayingBeforeFullscreen = player.rate > 0 || player.timeControlStatus == .playing
+            if player.rate > 0 {
+                playbackRateBeforeFullscreen = player.rate
+            }
+            wasPlayingBeforeFullscreen = shouldAutoplay
+                || player.rate > 0
+                || player.timeControlStatus == .playing
+                || player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            isHoldingPlaybackStateForFullscreenTransition = wasPlayingBeforeFullscreen
+            fullscreenPlaybackTransitionGeneration += 1
+        }
+
+        private func keepPlaybackRunningDuringFullscreenTransition() {
+            guard wasPlayingBeforeFullscreen else {
+                updatePlaybackState()
+                return
+            }
+
+            shouldAutoplay = true
+            let targetRate = max(playbackRateBeforeFullscreen, 1)
+            if player.currentItem?.status == .readyToPlay {
+                player.playImmediately(atRate: targetRate)
+            } else {
+                player.play()
+            }
+            updatePlaybackState()
+        }
+
+        private func releasePlaybackStateHoldAfterFullscreenTransition() {
+            let generation = fullscreenPlaybackTransitionGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, self.fullscreenPlaybackTransitionGeneration == generation else { return }
+                self.isHoldingPlaybackStateForFullscreenTransition = false
+                self.updatePlaybackState()
+            }
         }
 
         private func interfaceOrientation(for deviceOrientation: UIDeviceOrientation) -> UIInterfaceOrientation {
@@ -545,6 +593,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 playerViewController.setNeedsUpdateOfSupportedInterfaceOrientations()
             }
             AppOrientationController.lock(orientationMask, scene: playerViewController.view.window?.windowScene)
+            keepPlaybackRunningDuringFullscreenTransition()
             coordinator.animate { [weak self, weak playerViewController] _ in
                 guard let self, let playerViewController else { return }
                 self.updateOverlayVideoBounds(playerViewController.videoBounds, isFullscreen: true)
@@ -560,6 +609,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
         ) {
             capturePlaybackBeforeFullscreenTransition()
+            keepPlaybackRunningDuringFullscreenTransition()
             coordinator.animate { [weak self, weak playerViewController] _ in
                 guard let self, let playerViewController else { return }
                 self.updateOverlayVideoBounds(playerViewController.videoBounds, isFullscreen: false)
@@ -584,11 +634,14 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 
         private func restorePlaybackAfterFullscreenTransition() {
             if wasPlayingBeforeFullscreen {
-                player.rate = playbackRateBeforeFullscreen
+                shouldAutoplay = true
+                player.playImmediately(atRate: max(playbackRateBeforeFullscreen, 1))
+                releasePlaybackStateHoldAfterFullscreenTransition()
             } else {
+                isHoldingPlaybackStateForFullscreenTransition = false
                 player.pause()
+                updatePlaybackState()
             }
-            updatePlaybackState()
         }
 
         private func observeVideoBounds(on controller: AVPlayerViewController) {
@@ -596,12 +649,27 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             videoBoundsObserver?.invalidate()
             observedVideoBoundsController = controller
             videoBoundsObserver = controller.observe(\.videoBounds, options: [.initial, .new]) { [weak self] controller, _ in
-                DispatchQueue.main.async {
-                    self?.updateOverlayVideoBounds(
-                        controller.videoBounds,
+                let videoBounds = controller.videoBounds
+                DispatchQueue.main.async { [weak self] in
+                    self?.scheduleOverlayVideoBoundsUpdate(
+                        videoBounds,
                         isFullscreen: self?.isFullscreenActive == true
                     )
                 }
+            }
+        }
+
+        private func scheduleOverlayVideoBoundsUpdate(_ videoBounds: CGRect, isFullscreen: Bool) {
+            pendingOverlayVideoBoundsUpdate = (videoBounds, isFullscreen)
+            guard !isOverlayVideoBoundsUpdateScheduled else { return }
+
+            isOverlayVideoBoundsUpdateScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isOverlayVideoBoundsUpdateScheduled = false
+                guard let update = self.pendingOverlayVideoBoundsUpdate else { return }
+                self.pendingOverlayVideoBoundsUpdate = nil
+                self.updateOverlayVideoBounds(update.videoBounds, isFullscreen: update.isFullscreen)
             }
         }
 
@@ -615,6 +683,13 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 convertedBounds = contentOverlayView.convert(videoBounds, from: controller?.view)
             }
 
+            guard !convertedBounds.isApproximatelyEqual(to: lastAppliedOverlayVideoBounds)
+                    || isFullscreen != lastAppliedOverlayFullscreenState else {
+                return
+            }
+
+            lastAppliedOverlayVideoBounds = convertedBounds
+            lastAppliedOverlayFullscreenState = isFullscreen
             danmakuHostingController?.rootView = PlayerDanmakuOverlayView(
                 videoBounds: convertedBounds,
                 isFullscreen: isFullscreen
@@ -737,7 +812,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private func addTimeObserver() {
             removeTimeObserver()
             timeObserver = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 1, preferredTimescale: 600),
+                forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
                 queue: .main
             ) { [weak self] _ in
                 self?.updatePlaybackState()
@@ -755,8 +830,8 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             guard let playbackState else { return }
             let current = player.currentTime()
             let duration = player.currentItem?.duration ?? .invalid
-            let isPlaying = player.timeControlStatus == .playing
-            DispatchQueue.main.async {
+            let isPlaying = effectiveIsPlaying
+            let applyUpdate = {
                 guard duration.isValid, duration.isNumeric, duration.seconds > 0 else {
                     playbackState.updatePlayback(
                         position: nil,
@@ -781,6 +856,21 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                     isPlaying: isPlaying
                 )
             }
+            if Thread.isMainThread {
+                applyUpdate()
+            } else {
+                DispatchQueue.main.async(execute: applyUpdate)
+            }
+        }
+
+        private var effectiveIsPlaying: Bool {
+            if isHoldingPlaybackStateForFullscreenTransition, wasPlayingBeforeFullscreen {
+                return true
+            }
+
+            return player.rate > 0
+                || player.timeControlStatus == .playing
+                || (shouldAutoplay && player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
         }
 
         private static func timeText(_ seconds: Double) -> String {
@@ -949,6 +1039,23 @@ private final class PlayerSystemVolumeController {
         let targetVolume = min(max(currentVolume + delta, 0), 1)
         volumeSlider?.setValue(targetVolume, animated: false)
         volumeSlider?.sendActions(for: .valueChanged)
+    }
+}
+
+private extension CGRect {
+    func isApproximatelyEqual(to other: CGRect, tolerance: CGFloat = 0.5) -> Bool {
+        guard isNull == other.isNull else {
+            return false
+        }
+
+        if isNull {
+            return true
+        }
+
+        return abs(origin.x - other.origin.x) <= tolerance
+            && abs(origin.y - other.origin.y) <= tolerance
+            && abs(size.width - other.size.width) <= tolerance
+            && abs(size.height - other.size.height) <= tolerance
     }
 }
 
