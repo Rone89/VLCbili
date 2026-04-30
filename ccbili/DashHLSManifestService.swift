@@ -2,7 +2,7 @@
 
 struct DashHLSManifestService {
     func makeManifest(for source: PlayableVideoSource) async throws -> URL {
-        LocalHLSProxyServer.shared.resetForForegroundPlayback()
+        try LocalHLSProxyServer.shared.resetForForegroundPlayback()
 
         guard let audioURL = source.audioURL,
               let videoInitRange = byteRange(from: source.videoInitRange),
@@ -54,6 +54,14 @@ struct DashHLSManifestService {
         LocalHLSProxyServer.shared.registerPlaylist(manifests.videoPlaylist, for: videoPlaylistURL)
         LocalHLSProxyServer.shared.registerPlaylist(manifests.audioPlaylist, for: audioPlaylistURL)
         let masterURL = try LocalHLSProxyServer.shared.registerPlaylist(manifests.masterPlaylist, name: "master.m3u8")
+        prefetchStartupRanges(
+            videoURL: proxiedVideoURL,
+            videoInitRange: videoInitRange,
+            videoSegments: parsedVideoSegments,
+            audioURL: proxiedAudioURL,
+            audioInitRange: audioInitRange,
+            audioSegments: parsedAudioSegments
+        )
         try await LocalHLSProxyServer.shared.waitUntilReady()
         return masterURL
     }
@@ -69,6 +77,7 @@ struct DashHLSManifestService {
         for (key, value) in enrichedHeaders(headers) {
             request.setValue(value, forHTTPHeaderField: key)
         }
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         request.setValue("bytes=\(range.offset)-\(range.offset + range.length - 1)", forHTTPHeaderField: "Range")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
@@ -129,6 +138,28 @@ struct DashHLSManifestService {
                 byteRange: DASHHLSByteRange(offset: segment.range.offset, length: segment.range.length)
             )
         }
+    }
+
+    private func prefetchStartupRanges(
+        videoURL: URL,
+        videoInitRange: ByteRange,
+        videoSegments: [HLSSegment],
+        audioURL: URL,
+        audioInitRange: ByteRange,
+        audioSegments: [HLSSegment]
+    ) {
+        LocalHLSProxyServer.shared.prefetch(mediaURL: videoURL, rangeHeader: rangeHeader(for: videoInitRange))
+        LocalHLSProxyServer.shared.prefetch(mediaURL: audioURL, rangeHeader: rangeHeader(for: audioInitRange))
+        if let firstVideoSegment = videoSegments.first {
+            LocalHLSProxyServer.shared.prefetch(mediaURL: videoURL, rangeHeader: rangeHeader(for: firstVideoSegment.range))
+        }
+        if let firstAudioSegment = audioSegments.first {
+            LocalHLSProxyServer.shared.prefetch(mediaURL: audioURL, rangeHeader: rangeHeader(for: firstAudioSegment.range))
+        }
+    }
+
+    private func rangeHeader(for range: ByteRange) -> String {
+        "bytes=\(range.offset)-\(range.offset + range.length - 1)"
     }
 
     private func byteRange(from text: String?) -> ByteRange? {

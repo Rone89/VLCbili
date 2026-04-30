@@ -12,24 +12,31 @@ final class LocalHLSProxyServer {
     private var routes: [String: Route] = [:]
     private var routeCounter = 0
     private var playlists: [String: String] = [:]
+    private var prefetchedResponses: [String: CachedResponse] = [:]
     private var playlistCounter = 0
     private var headers: [String: String] = [:]
 
     private init() {}
 
-    func resetForForegroundPlayback() {
-        listener?.cancel()
-        listener = nil
-        listenerState = .setup
-        readyContinuations.removeAll()
+    func resetForForegroundPlayback() throws {
+        try startIfNeeded()
+        queue.sync {
+            routes.removeAll(keepingCapacity: true)
+            playlists.removeAll(keepingCapacity: true)
+            prefetchedResponses.removeAll(keepingCapacity: true)
+            headers.removeAll(keepingCapacity: true)
+        }
     }
 
     func register(mediaURL: URL, headers: [String: String]) throws -> URL {
         try startIfNeeded()
-        routeCounter += 1
-        let id = String(routeCounter)
-        routes[id] = Route(url: mediaURL)
-        self.headers = headers
+        let id = queue.sync {
+            routeCounter += 1
+            let id = String(routeCounter)
+            routes[id] = Route(url: mediaURL)
+            self.headers = headers
+            return id
+        }
         return URL(string: "http://127.0.0.1:\(serverPort)/dash/\(id)")!
     }
 
@@ -50,18 +57,16 @@ final class LocalHLSProxyServer {
 
     func registerPlaylist(_ content: String, name: String) throws -> URL {
         try startIfNeeded()
-        playlistCounter += 1
-        let safeName = name.replacingOccurrences(of: "/", with: "-")
-        let id = "\(playlistCounter)-\(safeName)"
-        playlists[id] = content
+        let id = nextPlaylistID(name: name)
+        queue.sync {
+            playlists[id] = content
+        }
         return URL(string: "http://127.0.0.1:\(serverPort)/hls/\(id)")!
     }
 
     func reservePlaylistURL(name: String) throws -> URL {
         try startIfNeeded()
-        playlistCounter += 1
-        let safeName = name.replacingOccurrences(of: "/", with: "-")
-        let id = "\(playlistCounter)-\(safeName)"
+        let id = nextPlaylistID(name: name)
         return URL(string: "http://127.0.0.1:\(serverPort)/hls/\(id)")!
     }
 
@@ -69,7 +74,38 @@ final class LocalHLSProxyServer {
         let path = url.path
         guard path.hasPrefix("/hls/") else { return }
         let id = String(path.dropFirst("/hls/".count).split(separator: "?").first ?? "")
-        playlists[id] = content
+        queue.sync {
+            playlists[id] = content
+        }
+    }
+
+    func prefetch(mediaURL: URL, rangeHeader: String) {
+        guard let (id, route) = routeAndID(for: mediaURL) else { return }
+        Task {
+            guard self.cachedResponse(id: id, rangeHeader: rangeHeader) == nil else { return }
+            do {
+                let (data, responseHeaders, statusCode) = try await self.fetch(route: route, id: id, rangeHeader: rangeHeader)
+                self.storeCachedResponse(
+                    CachedResponse(data: data, headers: responseHeaders, statusCode: statusCode),
+                    id: id,
+                    rangeHeader: rangeHeader
+                )
+            } catch {
+                HLSPlaybackDiagnostics.shared.recordProxyError(
+                    path: mediaURL.path,
+                    requestRange: rangeHeader,
+                    message: "prefetch:\(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private func nextPlaylistID(name: String) -> String {
+        queue.sync {
+            playlistCounter += 1
+            let safeName = name.replacingOccurrences(of: "/", with: "-")
+            return "\(playlistCounter)-\(safeName)"
+        }
     }
 
     private func startIfNeeded() throws {
@@ -144,7 +180,7 @@ final class LocalHLSProxyServer {
         let path = String(requestParts[1])
         if path.hasPrefix("/hls/") {
             let id = String(path.dropFirst("/hls/".count).split(separator: "?").first ?? "")
-            guard let playlist = playlists[id] else {
+            guard let playlist = playlist(for: id) else {
                 HLSPlaybackDiagnostics.shared.recordPlaylist(path: path, status: 404)
                 send(status: 404, body: Data(), connection: connection)
                 return
@@ -168,14 +204,31 @@ final class LocalHLSProxyServer {
             return
         }
         let id = String(path.dropFirst("/dash/".count).split(separator: "?").first ?? "")
-        guard let route = routes[id] else {
+        guard let route = route(for: id) else {
             send(status: 404, body: Data(), connection: connection)
             return
         }
 
         do {
             let rangeHeader = headerValue("Range", in: rawRequest)
-            let (data, responseHeaders, statusCode) = try await fetch(route: route, rangeHeader: rangeHeader)
+            if let cachedResponse = cachedResponse(id: id, rangeHeader: rangeHeader) {
+                HLSPlaybackDiagnostics.shared.recordProxy(
+                    path: path,
+                    requestRange: rangeHeader,
+                    status: cachedResponse.statusCode,
+                    responseRange: cachedResponse.headers["Content-Range"] ?? cachedResponse.headers["content-range"],
+                    bytes: cachedResponse.data.count
+                )
+                send(
+                    status: cachedResponse.statusCode,
+                    headers: cachedResponse.headers,
+                    body: cachedResponse.data,
+                    connection: connection
+                )
+                return
+            }
+
+            let (data, responseHeaders, statusCode) = try await fetch(route: route, id: id, rangeHeader: rangeHeader)
             HLSPlaybackDiagnostics.shared.recordProxy(
                 path: path,
                 requestRange: rangeHeader,
@@ -194,12 +247,13 @@ final class LocalHLSProxyServer {
         }
     }
 
-    private func fetch(route: Route, rangeHeader: String?) async throws -> (Data, [String: String], Int) {
+    private func fetch(route: Route, id: String, rangeHeader: String?) async throws -> (Data, [String: String], Int) {
         var request = URLRequest(url: route.url)
         request.timeoutInterval = 30
         for (key, value) in enrichedHeaders() {
             request.setValue(value, forHTTPHeaderField: key)
         }
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let rangeHeader {
             request.setValue(rangeHeader, forHTTPHeaderField: "Range")
         }
@@ -217,7 +271,7 @@ final class LocalHLSProxyServer {
     }
 
     private func enrichedHeaders() -> [String: String] {
-        var result = headers
+        var result = queue.sync { headers }
         let cookies = HTTPCookieStorage.shared.cookies ?? []
         if let cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], !cookieHeader.isEmpty {
             result["Cookie"] = cookieHeader
@@ -235,6 +289,43 @@ final class LocalHLSProxyServer {
             }
         }
         return nil
+    }
+
+    private func playlist(for id: String) -> String? {
+        queue.sync {
+            playlists[id]
+        }
+    }
+
+    private func route(for id: String) -> Route? {
+        queue.sync {
+            routes[id]
+        }
+    }
+
+    private func routeAndID(for mediaURL: URL) -> (String, Route)? {
+        let path = mediaURL.path
+        guard path.hasPrefix("/dash/") else { return nil }
+        let id = String(path.dropFirst("/dash/".count).split(separator: "?").first ?? "")
+        guard let route = route(for: id) else { return nil }
+        return (id, route)
+    }
+
+    private func cachedResponse(id: String, rangeHeader: String?) -> CachedResponse? {
+        guard let rangeHeader else { return nil }
+        return queue.sync {
+            prefetchedResponses[cacheKey(id: id, rangeHeader: rangeHeader)]
+        }
+    }
+
+    private func storeCachedResponse(_ response: CachedResponse, id: String, rangeHeader: String) {
+        queue.sync {
+            prefetchedResponses[cacheKey(id: id, rangeHeader: rangeHeader)] = response
+        }
+    }
+
+    private func cacheKey(id: String, rangeHeader: String) -> String {
+        "\(id)|\(rangeHeader)"
     }
 
     private func send(status: Int, headers: [String: String] = [:], body: Data, connection: NWConnection) {
@@ -260,5 +351,11 @@ final class LocalHLSProxyServer {
 
     private struct Route {
         let url: URL
+    }
+
+    private struct CachedResponse {
+        let data: Data
+        let headers: [String: String]
+        let statusCode: Int
     }
 }

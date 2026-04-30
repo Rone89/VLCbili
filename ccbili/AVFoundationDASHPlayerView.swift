@@ -70,6 +70,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private weak var activeOverlayController: AVPlayerViewController?
         private var orientationObserver: NSObjectProtocol?
         private var isAutomaticFullscreenTransitioning = false
+        private let sourceForwardBufferDuration: TimeInterval = 0.8
         private var danmakuHostingController: UIHostingController<PlayerDanmakuOverlayView>?
         private var gestureContainerView: PlayerGestureOverlayView?
         private var overlayConstraints: [NSLayoutConstraint] = []
@@ -840,8 +841,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
                         let item = AVPlayerItem(url: manifestURL)
-                        item.preferredForwardBufferDuration = 3
-                        self.player.automaticallyWaitsToMinimizeStalling = true
+                        self.configureFastStart(item)
                         self.observe(item: item)
                         self.player.replaceCurrentItem(with: item)
                         self.addTimeObserver()
@@ -863,7 +863,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 let item = try await makePlayerItem(videoURL: source.url, audioURL: audioURL, headers: source.headers)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    self.player.automaticallyWaitsToMinimizeStalling = true
+                    self.configureFastStart(item)
                     self.observe(item: item)
                     self.player.replaceCurrentItem(with: item)
                     self.addTimeObserver()
@@ -878,10 +878,9 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private func loadSingleURL(source: PlayableVideoSource) async {
             let asset = AVURLAsset(url: source.url, options: assetOptions(headers: source.headers))
             let item = AVPlayerItem(asset: asset)
-            item.preferredForwardBufferDuration = 3
 
             await MainActor.run {
-                self.player.automaticallyWaitsToMinimizeStalling = true
+                self.configureFastStart(item)
                 self.observe(item: item)
                 self.player.replaceCurrentItem(with: item)
                 self.addTimeObserver()
@@ -898,7 +897,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                     HLSPlaybackDiagnostics.shared.recordPlayerStatus("ready")
                     self.updateVideoSize(for: item)
                     if self.shouldAutoplay {
-                        self.player.play()
+                        self.player.playImmediately(atRate: 1)
                     }
                     self.updatePlaybackState()
                 case .failed:
@@ -932,14 +931,24 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 
         private func playWhenReady(item: AVPlayerItem) {
             shouldAutoplay = true
-            player.play()
+            if item.status == .readyToPlay {
+                player.playImmediately(atRate: 1)
+            } else {
+                player.play()
+            }
             if item.status != .readyToPlay {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self, weak item] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self, weak item] in
                     guard let self, self.shouldAutoplay, item === self.player.currentItem else { return }
                     self.player.play()
                     self.updatePlaybackState()
                 }
             }
+        }
+
+        private func configureFastStart(_ item: AVPlayerItem) {
+            item.preferredForwardBufferDuration = sourceForwardBufferDuration
+            item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
+            player.automaticallyWaitsToMinimizeStalling = false
         }
 
         private func addTimeObserver() {
@@ -1067,7 +1076,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             }
 
             let item = AVPlayerItem(asset: composition)
-            item.preferredForwardBufferDuration = 3
+            item.preferredForwardBufferDuration = sourceForwardBufferDuration
             return item
         }
 

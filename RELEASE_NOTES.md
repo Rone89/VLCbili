@@ -1,26 +1,26 @@
-# v0.1.133 - Bilibili DASH 音视频分离转 HLS Master
+# v0.1.134 - DASH/HLS 首屏加载提速
 
 ## 更新内容
 
-- 新增 `generateBilibiliDASHMasterManifest(...)`，把 Bilibili DASH 分离的音频 URL 和视频 URL 转成 AVPlayer 可直接加载的 HLS Master Playlist。
-- Master Playlist 使用 `#EXT-X-MEDIA` 声明音频轨，并通过 `AUDIO="audio_group"` 在 `#EXT-X-STREAM-INF` 中关联视频轨，交给 AVPlayer 自动同步音视频。
-- 视频和音频子清单都保留 `#EXT-X-MAP`，分别指向各自的 fMP4 初始化片段，解决初始化头缺失导致无法加载的问题。
-- 支持 `#EXT-X-BYTERANGE`，继续适配 Bilibili SegmentBase/sidx 这种单文件多 range 的 DASH 形态。
-- `CODECS` 会合并视频 codec 和音频 codec，避免只声明 `hev1` 时 AVPlayer 对音频轨识别不稳定。
-- Master 和媒体清单全部走本地 HLS 代理的绝对 URL，避免相对路径解析失败。
+- 本地 HLS 代理改为常驻复用，不再每次播放 DASH 分离流时取消并重新启动监听。
+- 切换新视频时只清理路由、清单和启动缓存，减少代理冷启动等待。
+- 生成 Master Playlist 后立即预取视频和音频的初始化片段以及首个媒体片段，帮助 AVPlayer 更快拿到起播所需数据。
+- DASH sidx 索引请求和本地代理 Range 请求统一使用 `Accept-Encoding: identity`，避免 Range 数据被压缩响应干扰。
+- AVPlayer 起播缓冲从偏保守模式改成快启模式，降低 `preferredForwardBufferDuration`，并关闭首屏阶段的过度等待。
+- 播放项 ready 后使用 `playImmediately(atRate:)`，减少 ready 到真正出画面的延迟。
 
-## 性能说明
+## 体验变化
 
-- 仍然只解析 sidx 并生成轻量字符串，不在主线程做复杂转换。
-- 子清单 URL 会先预留，再一次性生成 Master/Video/Audio 三份清单，减少 AVPlayer 首屏加载时的清单依赖等待。
-- fMP4 初始化片段和切片都复用同一个本地代理通道，保留请求头、Cookie、Range 请求能力。
+- DASH 音视频分离流首屏等待时间更短。
+- 切换视频或清晰度时，本地代理启动成本更低。
+- 弱网下仍可能短暂停顿，但会更倾向于快速出画，而不是先等较长缓冲。
 
 ## 验证建议
 
-- 播放 DASH 分离流视频，确认能正常起播且有声音。
-- 切换 4K/HDR 或 HEVC 清晰度，确认 `hev1`/HDR 内容能起播。
-- 拖动进度条，确认音画同步且不会重新从头播放。
-- 观察诊断信息，确认 Master、音频清单、视频清单都能被本地代理返回 200。
+- 连续打开多个视频，观察第二个及以后视频是否比之前更快进入播放。
+- 播放 4K/HEVC/HDR DASH 分离流，确认能快速出画且有声音。
+- 拖动进度条后确认能恢复播放，且音画同步。
+- 观察诊断信息，确认本地代理没有 404/502，首个 init/segment 请求正常。
 
 ## 打包说明
 
