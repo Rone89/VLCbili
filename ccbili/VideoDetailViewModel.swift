@@ -23,7 +23,6 @@ final class VideoDetailViewModel {
     var stats = VideoInteractionStats()
     var viewerState = VideoViewerInteractionState()
 
-    private let replyService = ReplyService()
     private let playURLCache = PlayURLCache.shared
 
     init(item: VideoItem) {
@@ -34,7 +33,6 @@ final class VideoDetailViewModel {
     var hasLoadedContent: Bool {
         !descriptionText.isEmpty ||
         author != nil ||
-        !comments.isEmpty ||
         !relatedVideos.isEmpty
     }
 
@@ -104,10 +102,7 @@ final class VideoDetailViewModel {
                 fallbackAvatarURL: ownerFaceURL
             )
 
-            async let loadedComments = loadComments(aid: detailData.aid)
-
             author = await loadedAuthor
-            comments = await loadedComments
 
             let related = try await relatedResponse
             if related.code == 0 {
@@ -274,36 +269,6 @@ final class VideoDetailViewModel {
             throw APIError.invalidURL
         }
         return url
-    }
-
-    private func loadComments(aid: Int?) async -> [VideoComment] {
-        guard let aid else {
-            return [
-                VideoComment(
-                    id: "comment-no-aid",
-                    username: "系统提示",
-                    message: "缺少 aid，暂时无法加载评论",
-                    userID: nil,
-                    avatarURL: nil,
-                    timeText: "时间未知"
-                )
-            ]
-        }
-
-        do {
-            return try await replyService.fetchVideoReplies(oid: aid, type: 1, sort: 1)
-        } catch {
-            return [
-                VideoComment(
-                    id: "comment-load-failed",
-                    username: "系统提示",
-                    message: "评论加载失败：\(error.localizedDescription)",
-                    userID: nil,
-                    avatarURL: nil,
-                    timeText: "时间未知"
-                )
-            ]
-        }
     }
 
     private func buildAuthor(mid: Int?, fallbackName: String, fallbackAvatarURL: URL?) async -> VideoAuthor {

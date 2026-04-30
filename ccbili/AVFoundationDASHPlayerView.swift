@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import MediaPlayer
 import SwiftUI
 import UIKit
 
@@ -30,10 +31,12 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
     }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
+        let controller = LandscapeAVPlayerController()
         controller.player = context.coordinator.player
+        controller.delegate = context.coordinator
         context.coordinator.attachInlineController(controller)
-        controller.showsPlaybackControls = false
+        context.coordinator.installOverlays(in: controller)
+        controller.showsPlaybackControls = true
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.entersFullScreenWhenPlaybackBegins = false
@@ -49,17 +52,22 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             controller.player = context.coordinator.player
         }
         context.coordinator.attachInlineController(controller)
-        controller.showsPlaybackControls = false
+        context.coordinator.installOverlays(in: controller)
+        controller.showsPlaybackControls = true
+        controller.allowsPictureInPicturePlayback = true
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.videoGravity = .resizeAspect
         context.coordinator.play(source: source)
     }
 
     static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
+        controller.delegate = nil
+        coordinator.teardownPlayerController()
         coordinator.stop()
         AppOrientationController.lock(.portrait)
     }
 
-    final class Coordinator {
+    final class Coordinator: NSObject, AVPlayerViewControllerDelegate, UIGestureRecognizerDelegate {
         let player = AVPlayer()
         var onVideoSizeChange: (CGSize) -> Void
         private weak var playbackState: BilibiliVLCPlaybackState?
@@ -67,12 +75,22 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private var currentSource: PlayableVideoSource?
         private var loadTask: Task<Void, Never>?
         private var statusObserver: NSKeyValueObservation?
+        private var videoBoundsObserver: NSKeyValueObservation?
         private var timeObserver: Any?
         private var shouldAutoplay = true
-        private var orientationObserver: NSObjectProtocol?
         private weak var inlinePlayerViewController: AVPlayerViewController?
-        private var fullscreenWindow: UIWindow?
-        private var fullscreenController: LandscapePlayerFullscreenController?
+        private weak var observedVideoBoundsController: AVPlayerViewController?
+        private var danmakuHostingController: UIHostingController<PlayerDanmakuOverlayView>?
+        private var gestureContainerView: PlayerGestureOverlayView?
+        private var overlayConstraints: [NSLayoutConstraint] = []
+        private var playbackRateBeforeFullscreen: Float = 1
+        private var wasPlayingBeforeFullscreen = false
+        private var isFullscreenActive = false
+        private var longPressPlaybackRate: Float = 1
+        private var wasPlayingBeforeLongPress = false
+        private var panStartPosition: Double = 0
+        private var panStartBrightness: CGFloat = 0
+        private lazy var volumeController = PlayerSystemVolumeController()
 
         init(
             playbackState: BilibiliVLCPlaybackState,
@@ -82,13 +100,12 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             self.playbackState = playbackState
             self.commandCenter = commandCenter
             self.onVideoSizeChange = onVideoSizeChange
+            super.init()
             bindCommands()
-            startOrientationObservation()
         }
 
         deinit {
-            stopOrientationObservation()
-            dismissLandscapeFullscreen()
+            teardownPlayerController()
             removeTimeObserver()
         }
 
@@ -110,10 +127,11 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         }
 
         func stop() {
-            dismissLandscapeFullscreen()
             loadTask?.cancel()
             statusObserver?.invalidate()
             statusObserver = nil
+            videoBoundsObserver?.invalidate()
+            videoBoundsObserver = nil
             removeTimeObserver()
             player.pause()
             player.replaceCurrentItem(with: nil)
@@ -122,9 +140,69 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 
         func attachInlineController(_ controller: AVPlayerViewController) {
             inlinePlayerViewController = controller
-            if fullscreenController == nil, controller.player !== player {
+            if controller.player !== player {
                 controller.player = player
             }
+        }
+
+        func installOverlays(in controller: AVPlayerViewController) {
+            guard let contentOverlayView = controller.contentOverlayView else { return }
+
+            if danmakuHostingController?.view.superview !== contentOverlayView {
+                danmakuHostingController?.willMove(toParent: nil)
+                danmakuHostingController?.view.removeFromSuperview()
+                danmakuHostingController?.removeFromParent()
+
+                let hostingController = UIHostingController(
+                    rootView: PlayerDanmakuOverlayView(videoBounds: controller.videoBounds, isFullscreen: false)
+                )
+                hostingController.view.backgroundColor = .clear
+                hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+                controller.addChild(hostingController)
+                contentOverlayView.addSubview(hostingController.view)
+                hostingController.didMove(toParent: controller)
+                danmakuHostingController = hostingController
+            }
+
+            if gestureContainerView?.superview !== contentOverlayView {
+                gestureContainerView?.removeFromSuperview()
+
+                let gestureView = PlayerGestureOverlayView()
+                gestureView.translatesAutoresizingMaskIntoConstraints = false
+                contentOverlayView.addSubview(gestureView)
+                installGestures(on: gestureView)
+                volumeController.attach(to: gestureView)
+                gestureContainerView = gestureView
+            }
+
+            NSLayoutConstraint.deactivate(overlayConstraints)
+            overlayConstraints = [danmakuHostingController?.view, gestureContainerView].compactMap { $0 }.flatMap { overlayView in
+                [
+                    overlayView.topAnchor.constraint(equalTo: contentOverlayView.topAnchor),
+                    overlayView.bottomAnchor.constraint(equalTo: contentOverlayView.bottomAnchor),
+                    overlayView.leadingAnchor.constraint(equalTo: contentOverlayView.leadingAnchor),
+                    overlayView.trailingAnchor.constraint(equalTo: contentOverlayView.trailingAnchor)
+                ]
+            }
+            NSLayoutConstraint.activate(overlayConstraints)
+
+            observeVideoBounds(on: controller)
+            updateOverlayVideoBounds(controller.videoBounds, isFullscreen: isFullscreenActive)
+        }
+
+        func teardownPlayerController() {
+            videoBoundsObserver?.invalidate()
+            videoBoundsObserver = nil
+            observedVideoBoundsController = nil
+            NSLayoutConstraint.deactivate(overlayConstraints)
+            overlayConstraints = []
+            volumeController.detach()
+            gestureContainerView?.removeFromSuperview()
+            gestureContainerView = nil
+            danmakuHostingController?.willMove(toParent: nil)
+            danmakuHostingController?.view.removeFromSuperview()
+            danmakuHostingController?.removeFromParent()
+            danmakuHostingController = nil
         }
 
         private func bindCommands() {
@@ -176,103 +254,194 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
 
         }
 
-        private func startOrientationObservation() {
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            orientationObserver = NotificationCenter.default.addObserver(
-                forName: UIDevice.orientationDidChangeNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                self?.handleDeviceOrientationChange(UIDevice.current.orientation)
-            }
+        private func installGestures(on view: PlayerGestureOverlayView) {
+            view.gestureRecognizers?.forEach(view.removeGestureRecognizer)
+            view.backgroundColor = .clear
+
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            doubleTap.cancelsTouchesInView = false
+            doubleTap.delegate = self
+            view.addGestureRecognizer(doubleTap)
+
+            let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+            longPress.minimumPressDuration = 0.35
+            longPress.cancelsTouchesInView = false
+            longPress.delegate = self
+            view.addGestureRecognizer(longPress)
+
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            pan.maximumNumberOfTouches = 1
+            pan.cancelsTouchesInView = false
+            pan.delegate = self
+            view.addGestureRecognizer(pan)
         }
 
-        private func stopOrientationObservation() {
-            if let orientationObserver {
-                NotificationCenter.default.removeObserver(orientationObserver)
-                self.orientationObserver = nil
-            }
+        @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended else { return }
+            commandCenter?.togglePlay()
         }
 
-        private func handleDeviceOrientationChange(_ orientation: UIDeviceOrientation) {
-            switch orientation {
-            case .landscapeLeft, .landscapeRight:
-                presentLandscapeFullscreen(orientation: orientation)
-            case .portrait, .portraitUpsideDown:
-                dismissLandscapeFullscreen()
+        @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                wasPlayingBeforeLongPress = player.rate > 0 || player.timeControlStatus == .playing
+                longPressPlaybackRate = player.rate > 0 ? player.rate : 1
+                player.rate = 2
+            case .ended, .cancelled, .failed:
+                if wasPlayingBeforeLongPress {
+                    player.rate = longPressPlaybackRate
+                } else {
+                    player.pause()
+                }
             default:
                 break
             }
         }
 
-        private func presentLandscapeFullscreen(orientation: UIDeviceOrientation) {
-            if let fullscreenController {
-                fullscreenController.update(orientation: orientation)
-                return
+        @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard let targetView = gesture.view,
+                  let item = player.currentItem else { return }
+
+            let location = gesture.location(in: targetView)
+            let translation = gesture.translation(in: targetView)
+
+            switch gesture.state {
+            case .began:
+                panStartPosition = playbackState?.position ?? 0
+                panStartBrightness = UIScreen.main.brightness
+            case .changed:
+                if abs(translation.x) > abs(translation.y) {
+                    let delta = translation.x / max(targetView.bounds.width, 1)
+                    playbackState?.pendingSeekPosition = min(max(panStartPosition + delta, 0), 1)
+                    updatePlaybackState()
+                } else if location.x < targetView.bounds.midX {
+                    let brightness = panStartBrightness - translation.y / max(targetView.bounds.height, 1)
+                    UIScreen.main.brightness = min(max(brightness, 0), 1)
+                } else {
+                    volumeController.changeVolume(by: Float(-translation.y / max(targetView.bounds.height, 1)))
+                    gesture.setTranslation(.zero, in: targetView)
+                }
+            case .ended, .cancelled:
+                guard let pendingSeekPosition = playbackState?.pendingSeekPosition else { return }
+                let duration = item.duration
+                guard duration.isValid, duration.isNumeric, duration.seconds > 0 else { return }
+                let target = CMTime(seconds: duration.seconds * min(max(pendingSeekPosition, 0), 1), preferredTimescale: 600)
+                let shouldResume = player.timeControlStatus == .playing
+                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+                    guard let self else { return }
+                    self.playbackState?.pendingSeekPosition = nil
+                    if shouldResume {
+                        self.player.play()
+                    }
+                    self.updatePlaybackState()
+                }
+            default:
+                break
             }
-
-            guard let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive })
-            else { return }
-
-            let inlineFrame = inlinePlayerViewController?.view.convert(
-                inlinePlayerViewController?.view.bounds ?? .zero,
-                to: nil
-            )
-            let controller = LandscapePlayerFullscreenController(
-                player: player,
-                orientation: orientation,
-                sourceFrame: inlineFrame
-            )
-            inlinePlayerViewController?.player = nil
-            let window = UIWindow(windowScene: scene)
-            window.windowLevel = .alert + 2
-            window.backgroundColor = .black
-            window.rootViewController = controller
-            window.isHidden = false
-            fullscreenWindow = window
-            fullscreenController = controller
-            controller.animateIn()
         }
 
-        private func dismissLandscapeFullscreen() {
-            guard let controller = fullscreenController, let window = fullscreenWindow else {
-                inlinePlayerViewController?.player = player
-                return
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
+
+        func playerViewController(
+            _ playerViewController: AVPlayerViewController,
+            willBeginFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
+        ) {
+            playbackRateBeforeFullscreen = player.rate > 0 ? player.rate : 1
+            wasPlayingBeforeFullscreen = player.rate > 0 || player.timeControlStatus == .playing || shouldAutoplay
+            isFullscreenActive = true
+            AppOrientationController.lock(.landscape, scene: playerViewController.view.window?.windowScene)
+            coordinator.animate { [weak self, weak playerViewController] _ in
+                guard let self, let playerViewController else { return }
+                self.updateOverlayVideoBounds(playerViewController.videoBounds, isFullscreen: true)
+            } completion: { [weak self, weak playerViewController] _ in
+                guard let self, let playerViewController else { return }
+                self.restorePlaybackAfterFullscreenTransition()
+                self.updateOverlayVideoBounds(playerViewController.videoBounds, isFullscreen: true)
             }
-            fullscreenController = nil
-            fullscreenWindow = nil
-            controller.animateOut { [weak self] in
-                controller.detachPlayer()
-                window.isHidden = true
-                AppOrientationController.lock(.portrait, scene: window.windowScene)
-                self?.inlinePlayerViewController?.player = self?.player
+        }
+
+        func playerViewController(
+            _ playerViewController: AVPlayerViewController,
+            willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator
+        ) {
+            playbackRateBeforeFullscreen = player.rate > 0 ? player.rate : 1
+            wasPlayingBeforeFullscreen = player.rate > 0 || player.timeControlStatus == .playing || shouldAutoplay
+            coordinator.animate { [weak self, weak playerViewController] _ in
+                guard let self, let playerViewController else { return }
+                self.updateOverlayVideoBounds(playerViewController.videoBounds, isFullscreen: false)
+            } completion: { [weak self, weak playerViewController] _ in
+                guard let self, let playerViewController else { return }
+                self.isFullscreenActive = false
+                AppOrientationController.lock(.portrait, scene: playerViewController.view.window?.windowScene)
+                self.restorePlaybackAfterFullscreenTransition()
+                self.updateOverlayVideoBounds(playerViewController.videoBounds, isFullscreen: false)
             }
+        }
+
+        private func restorePlaybackAfterFullscreenTransition() {
+            if wasPlayingBeforeFullscreen {
+                player.rate = playbackRateBeforeFullscreen
+            } else {
+                player.pause()
+            }
+            updatePlaybackState()
+        }
+
+        private func observeVideoBounds(on controller: AVPlayerViewController) {
+            guard videoBoundsObserver == nil || observedVideoBoundsController !== controller else { return }
+            videoBoundsObserver?.invalidate()
+            observedVideoBoundsController = controller
+            videoBoundsObserver = controller.observe(\.videoBounds, options: [.initial, .new]) { [weak self] controller, _ in
+                DispatchQueue.main.async {
+                    self?.updateOverlayVideoBounds(
+                        controller.videoBounds,
+                        isFullscreen: self?.isFullscreenActive == true
+                    )
+                }
+            }
+        }
+
+        private func updateOverlayVideoBounds(_ videoBounds: CGRect, isFullscreen: Bool) {
+            guard let contentOverlayView = inlinePlayerViewController?.contentOverlayView else { return }
+            let convertedBounds: CGRect
+            if videoBounds == .zero {
+                convertedBounds = contentOverlayView.bounds
+            } else {
+                convertedBounds = contentOverlayView.convert(videoBounds, from: inlinePlayerViewController?.view)
+            }
+
+            danmakuHostingController?.rootView = PlayerDanmakuOverlayView(
+                videoBounds: convertedBounds,
+                isFullscreen: isFullscreen
+            )
+            gestureContainerView?.videoBounds = convertedBounds
         }
 
         private func loadAndPlay(source: PlayableVideoSource) async {
             configureAudioSession()
 
-            if (source.quality ?? 0) > 80 {
+            if source.isDASHSeparated {
                 do {
                     HLSPlaybackDiagnostics.shared.reset()
                     let manifestURL = try await DashHLSManifestService().makeManifest(for: source)
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
                         let item = AVPlayerItem(url: manifestURL)
-                        item.preferredForwardBufferDuration = 0.8
-                        self.player.automaticallyWaitsToMinimizeStalling = false
+                        item.preferredForwardBufferDuration = 3
+                        self.player.automaticallyWaitsToMinimizeStalling = true
                         self.observe(item: item)
                         self.player.replaceCurrentItem(with: item)
                         self.addTimeObserver()
                         self.updatePlaybackState()
                         self.playWhenReady(item: item)
                     }
+                    return
                 } catch {
                     print("DASH to HLS load failed: \(error.localizedDescription)")
                 }
-                return
             }
 
             guard let audioURL = source.audioURL else {
@@ -284,7 +453,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
                 let item = try await makePlayerItem(videoURL: source.url, audioURL: audioURL, headers: source.headers)
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    self.player.automaticallyWaitsToMinimizeStalling = false
+                    self.player.automaticallyWaitsToMinimizeStalling = true
                     self.observe(item: item)
                     self.player.replaceCurrentItem(with: item)
                     self.addTimeObserver()
@@ -299,10 +468,10 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private func loadSingleURL(source: PlayableVideoSource) async {
             let asset = AVURLAsset(url: source.url, options: assetOptions(headers: source.headers))
             let item = AVPlayerItem(asset: asset)
-            item.preferredForwardBufferDuration = 0.8
+            item.preferredForwardBufferDuration = 3
 
             await MainActor.run {
-                self.player.automaticallyWaitsToMinimizeStalling = false
+                self.player.automaticallyWaitsToMinimizeStalling = true
                 self.observe(item: item)
                 self.player.replaceCurrentItem(with: item)
                 self.addTimeObserver()
@@ -366,7 +535,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
         private func addTimeObserver() {
             removeTimeObserver()
             timeObserver = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+                forInterval: CMTime(seconds: 1, preferredTimescale: 600),
                 queue: .main
             ) { [weak self] _ in
                 self?.updatePlaybackState()
@@ -386,19 +555,29 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             let duration = player.currentItem?.duration ?? .invalid
             let isPlaying = player.timeControlStatus == .playing
             DispatchQueue.main.async {
-                playbackState.isPlaying = isPlaying
                 guard duration.isValid, duration.isNumeric, duration.seconds > 0 else {
-                    playbackState.elapsedText = Self.timeText(current.seconds)
-                    playbackState.durationText = "00:00"
+                    playbackState.updatePlayback(
+                        position: nil,
+                        elapsedText: Self.timeText(current.seconds),
+                        durationText: "00:00",
+                        isPlaying: isPlaying
+                    )
                     return
                 }
+                let position: Double?
                 if let pendingSeekPosition = playbackState.pendingSeekPosition {
-                    playbackState.position = pendingSeekPosition
+                    position = pendingSeekPosition
                 } else if !playbackState.isScrubbing {
-                    playbackState.position = min(max(current.seconds / duration.seconds, 0), 1)
+                    position = min(max(current.seconds / duration.seconds, 0), 1)
+                } else {
+                    position = nil
                 }
-                playbackState.elapsedText = Self.timeText(current.seconds)
-                playbackState.durationText = Self.timeText(duration.seconds)
+                playbackState.updatePlayback(
+                    position: position,
+                    elapsedText: Self.timeText(current.seconds),
+                    durationText: Self.timeText(duration.seconds),
+                    isPlaying: isPlaying
+                )
             }
         }
 
@@ -463,7 +642,7 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
             }
 
             let item = AVPlayerItem(asset: composition)
-            item.preferredForwardBufferDuration = 1
+            item.preferredForwardBufferDuration = 3
             return item
         }
 
@@ -479,143 +658,84 @@ struct AVFoundationDASHPlayerView: UIViewControllerRepresentable {
     }
 }
 
-final class LandscapePlayerFullscreenController: UIViewController {
-    private let player: AVPlayer
-    private let playerViewController = AVPlayerViewController()
-    private let sourceFrame: CGRect?
-    private var orientation: UIDeviceOrientation
-    private var currentScale: CGFloat = 1
-    private var currentAlpha: CGFloat = 1
-    private var currentCenter: CGPoint?
-
-    init(player: AVPlayer, orientation: UIDeviceOrientation, sourceFrame: CGRect?) {
-        self.player = player
-        self.orientation = orientation
-        self.sourceFrame = sourceFrame
-        super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .fullScreen
+final class LandscapeAVPlayerController: AVPlayerViewController {
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        [.portrait, .landscapeLeft, .landscapeRight]
     }
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        .landscapeLeft
     }
 
-    override var prefersStatusBarHidden: Bool { true }
-    override var prefersHomeIndicatorAutoHidden: Bool { true }
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { orientationMask }
-    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .black
-        setNeedsUpdateOfHomeIndicatorAutoHidden()
-
-        playerViewController.player = player
-        playerViewController.showsPlaybackControls = true
-        playerViewController.allowsPictureInPicturePlayback = true
-        playerViewController.videoGravity = .resizeAspect
-        playerViewController.view.backgroundColor = .black
-
-        addChild(playerViewController)
-        view.addSubview(playerViewController.view)
-        playerViewController.didMove(toParent: self)
-        update(orientation: orientation)
+    override var shouldAutorotate: Bool {
+        true
     }
+}
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        setNeedsUpdateOfSupportedInterfaceOrientations()
-        AppOrientationController.lock(orientationMask, scene: view.window?.windowScene)
-    }
+private struct PlayerDanmakuOverlayView: View {
+    let videoBounds: CGRect
+    let isFullscreen: Bool
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        layoutPlayerView()
-    }
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.clear
 
-    func update(orientation: UIDeviceOrientation) {
-        self.orientation = orientation
-        guard isViewLoaded else { return }
-        setNeedsUpdateOfSupportedInterfaceOrientations()
-        AppOrientationController.lock(orientationMask, scene: view.window?.windowScene)
-        currentScale = 1
-        currentAlpha = 1
-        currentCenter = nil
-        UIView.animate(
-            withDuration: 0.36,
-            delay: 0,
-            usingSpringWithDamping: 0.86,
-            initialSpringVelocity: 0.18,
-            options: [.beginFromCurrentState, .allowUserInteraction]
-        ) {
-            self.layoutPlayerView()
+                Color.clear
+                    .frame(
+                        width: max(videoBounds.width, 0),
+                        height: max(videoBounds.height, 0)
+                    )
+                    .position(
+                        x: min(max(videoBounds.midX, 0), proxy.size.width),
+                        y: min(max(videoBounds.midY, 0), proxy.size.height)
+                    )
+            }
+            .allowsHitTesting(false)
         }
     }
+}
 
-    func animateIn() {
-        guard isViewLoaded else { return }
-        currentAlpha = 0
-        currentScale = initialPresentationScale()
-        currentCenter = sourceFrame.map { CGPoint(x: $0.midX, y: $0.midY) }
-        layoutPlayerView()
-        UIView.animate(
-            withDuration: 0.42,
-            delay: 0,
-            usingSpringWithDamping: 0.84,
-            initialSpringVelocity: 0.2,
-            options: [.beginFromCurrentState, .allowUserInteraction]
-        ) {
-            self.currentAlpha = 1
-            self.currentScale = 1
-            self.currentCenter = nil
-            self.layoutPlayerView()
+private final class PlayerGestureOverlayView: UIView {
+    var videoBounds: CGRect = .zero
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard videoBounds != .zero else {
+            return false
         }
+        return videoBounds.contains(point)
+    }
+}
+
+private final class PlayerSystemVolumeController {
+    private let volumeView = MPVolumeView(frame: .zero)
+    private weak var volumeSlider: UISlider?
+    private var currentVolume: Float {
+        AVAudioSession.sharedInstance().outputVolume
     }
 
-    func animateOut(completion: @escaping () -> Void) {
-        guard isViewLoaded else {
-            completion()
-            return
-        }
-        UIView.animate(
-            withDuration: 0.28,
-            delay: 0,
-            options: [.beginFromCurrentState, .curveEaseInOut, .allowUserInteraction]
-        ) {
-            self.currentScale = self.initialPresentationScale()
-            self.currentAlpha = 0
-            self.currentCenter = self.sourceFrame.map { CGPoint(x: $0.midX, y: $0.midY) }
-            self.layoutPlayerView()
-        } completion: { _ in
-            completion()
-        }
+    init() {
+        volumeView.alpha = 0.01
+        volumeView.isUserInteractionEnabled = false
+        volumeSlider = volumeView.subviews.compactMap { $0 as? UISlider }.first
     }
 
-    func detachPlayer() {
-        playerViewController.player = nil
-        playerViewController.willMove(toParent: nil)
-        playerViewController.view.removeFromSuperview()
-        playerViewController.removeFromParent()
+    func attach(to view: UIView) {
+        guard volumeView.superview !== view else { return }
+        volumeView.removeFromSuperview()
+        volumeView.frame = CGRect(x: -100, y: -100, width: 1, height: 1)
+        view.addSubview(volumeView)
+        volumeSlider = volumeView.subviews.compactMap { $0 as? UISlider }.first
     }
 
-    private func layoutPlayerView() {
-        let bounds = view.bounds
-        playerViewController.view.bounds = CGRect(origin: .zero, size: bounds.size)
-        playerViewController.view.center = currentCenter ?? CGPoint(x: bounds.midX, y: bounds.midY)
-        playerViewController.view.transform = CGAffineTransform(scaleX: currentScale, y: currentScale)
-        playerViewController.view.alpha = currentAlpha
+    func detach() {
+        volumeView.removeFromSuperview()
     }
 
-    private func initialPresentationScale() -> CGFloat {
-        let bounds = view.bounds
-        guard bounds.width > 0, bounds.height > 0 else { return 0.92 }
-        let inlineHeight = bounds.width * 9 / 16
-        let fullscreenHeight = bounds.width
-        return max(0.2, min(1, inlineHeight / fullscreenHeight))
-    }
-
-    private var orientationMask: UIInterfaceOrientationMask {
-        orientation == .landscapeLeft ? .landscapeRight : .landscapeLeft
+    func changeVolume(by delta: Float) {
+        let targetVolume = min(max(currentVolume + delta, 0), 1)
+        volumeSlider?.setValue(targetVolume, animated: false)
+        volumeSlider?.sendActions(for: .valueChanged)
     }
 }
 

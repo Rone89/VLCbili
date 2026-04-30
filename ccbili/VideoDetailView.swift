@@ -1,14 +1,11 @@
 import SwiftUI
-import AVKit
 
 struct VideoDetailView: View {
     @Environment(AuthManager.self) private var authManager
 
     @State private var viewModel: VideoDetailViewModel
     @State private var favoriteViewModel = VideoFavoriteViewModel()
-    @State private var player: AVPlayer?
-    @State private var playerURL: URL?
-    @State private var playbackPosition: Double = 0
+    @State private var playbackProgress = VideoPlaybackProgressTracker()
 
     @State private var interactionService = VideoInteractionService()
     @State private var isSubmittingLike = false
@@ -24,7 +21,6 @@ struct VideoDetailView: View {
     @State private var commentSortMode: CommentSortMode = .hot
     @State private var videoAspectRatio: CGFloat = 16 / 9
     @State private var restoredPlaybackPosition: Double?
-    @State private var lastSavedPlaybackPercent = -1
     @State private var expandedCommentReplies: [String: [VideoCommentPreviewReply]] = [:]
     @State private var loadingReplyCommentIDs: Set<String> = []
     @State private var isLoadingComments = false
@@ -80,11 +76,10 @@ struct VideoDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .onAppear {
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             AppOrientationController.lock(.portrait)
             if let history = VideoPlaybackHistoryStore.history(for: viewModel.playbackItem.id) {
                 restoredPlaybackPosition = history.position
-                playbackPosition = history.position
+                playbackProgress.position = history.position
             }
         }
         .task {
@@ -96,9 +91,9 @@ struct VideoDetailView: View {
                 didLike = viewModel.viewerState.didLike
                 didCoin = viewModel.viewerState.didCoin
                 favoriteViewModel.isFavorite = viewModel.viewerState.didFavorite
-                await reloadComments(sortMode: commentSortMode)
-            } else {
-                configurePlayer(for: viewModel.playURL)
+                if selectedTab == .comments {
+                    await reloadComments(sortMode: commentSortMode)
+                }
             }
 
             if authManager.isLoggedIn && authManager.avatarURL == nil {
@@ -107,20 +102,31 @@ struct VideoDetailView: View {
         }
         .refreshable {
             await viewModel.load()
-            await reloadComments(sortMode: commentSortMode)
+            if selectedTab == .comments {
+                await reloadComments(sortMode: commentSortMode)
+            }
             favoriteViewModel.load(videoID: viewModel.playbackItem.id)
         }
-        .onChange(of: viewModel.playURL) { _, newValue in
-            configurePlayer(for: newValue)
-        }
         .onChange(of: commentSortMode) { _, newValue in
+            guard selectedTab == .comments else { return }
+
             Task {
                 await reloadComments(sortMode: newValue)
             }
         }
+        .onChange(of: selectedTab) { _, newValue in
+            guard newValue == .comments,
+                  viewModel.comments.isEmpty,
+                  !isLoadingComments else {
+                return
+            }
+
+            Task {
+                await reloadComments(sortMode: commentSortMode)
+            }
+        }
         .onDisappear {
             savePlaybackHistoryIfNeeded(force: true)
-            configurePlayer(for: nil)
             AppOrientationController.lock(.portrait)
         }
     }
@@ -139,10 +145,9 @@ struct VideoDetailView: View {
             BilibiliVLCPlayerView(
                 source: source,
                 enablesAutoFullscreen: false,
-                initialPosition: restoredPlaybackPosition ?? playbackPosition,
+                initialPosition: restoredPlaybackPosition ?? playbackProgress.position,
                 onPositionChange: { position in
-                    playbackPosition = position
-                    savePlaybackHistoryIfNeeded()
+                    handlePlaybackPositionChange(position)
                 },
                 onVideoSizeChange: { videoSize in
                     updateVideoAspectRatio(videoSize)
@@ -291,9 +296,12 @@ struct VideoDetailView: View {
             return
         }
 
-        withAnimation(.easeInOut(duration: 0.25)) {
-            videoAspectRatio = videoSize.width / videoSize.height
+        let aspectRatio = videoSize.width / videoSize.height
+        guard aspectRatio.isFinite, abs(aspectRatio - videoAspectRatio) > 0.01 else {
+            return
         }
+
+        videoAspectRatio = aspectRatio
     }
 
     // MARK: - Info
@@ -379,22 +387,19 @@ struct VideoDetailView: View {
     }
 
     private var authorAvatarView: some View {
-        AsyncImage(url: viewModel.author?.avatarURL) { phase in
-            switch phase {
-            case .empty:
+        RemoteImageView(
+            url: viewModel.author?.avatarURL,
+            maxPixelLength: 96,
+            placeholder: {
                 Circle()
                     .fill(Color(.quaternarySystemFill))
-                    .overlay { ProgressView() }
-            case .success(let image):
-                image.resizable().scaledToFill()
-            case .failure:
+            },
+            failureView: { _ in
                 Circle()
                     .fill(Color(.quaternarySystemFill))
                     .overlay { Image(systemName: "person.fill").foregroundStyle(.secondary) }
-            @unknown default:
-                Circle().fill(Color(.quaternarySystemFill))
             }
-        }
+        )
     }
 
     private var qualityPicker: some View {
@@ -451,10 +456,10 @@ struct VideoDetailView: View {
     @MainActor
     private func switchPlaybackQuality(to option: VideoQualityOption) async {
         guard !isSwitchingQuality else { return }
-        let currentPosition = playbackPosition
+        let currentPosition = playbackProgress.position
         isSwitchingQuality = true
         await viewModel.switchPlaybackQuality(to: option)
-        playbackPosition = currentPosition
+        playbackProgress.position = currentPosition
         restoredPlaybackPosition = currentPosition
         isSwitchingQuality = false
     }
@@ -498,30 +503,22 @@ struct VideoDetailView: View {
             if let author = viewModel.author {
                 HStack(spacing: 12) {
                     authorProfileLink {
-                        AsyncImage(url: author.avatarURL) { phase in
-                            switch phase {
-                            case .empty:
+                        RemoteImageView(
+                            url: author.avatarURL,
+                            maxPixelLength: 96,
+                            placeholder: {
                                 Circle()
                                     .fill(Color(.quaternarySystemFill))
-                                    .overlay {
-                                        ProgressView()
-                                    }
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            case .failure:
+                            },
+                            failureView: { _ in
                                 Circle()
                                     .fill(Color(.quaternarySystemFill))
                                     .overlay {
                                         Image(systemName: "person.fill")
                                             .foregroundStyle(.secondary)
                                     }
-                            @unknown default:
-                                Circle()
-                                    .fill(Color(.quaternarySystemFill))
                             }
-                        }
+                        )
                         .frame(width: 46, height: 46)
                         .clipShape(Circle())
                     }
@@ -816,47 +813,10 @@ struct VideoDetailView: View {
                 Text("暂无评论")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(viewModel.comments) { comment in
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .top, spacing: 10) {
-                            NavigationLink {
-                                if let mid = Int(comment.userID ?? "") {
-                                    UserProfileView(mid: mid, username: comment.username)
-                                } else {
-                                    UserSpaceWebView(userID: comment.userID, username: comment.username)
-                                }
-                            } label: {
-                                AsyncImage(url: comment.avatarURL) { phase in
-                                    switch phase {
-                                    case .empty:
-                                        Circle()
-                                            .fill(Color(.quaternarySystemFill))
-                                            .overlay {
-                                                ProgressView()
-                                            }
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .scaledToFill()
-                                    case .failure:
-                                        Circle()
-                                            .fill(Color(.quaternarySystemFill))
-                                            .overlay {
-                                                Image(systemName: "person.fill")
-                                                    .font(.system(size: 11))
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                    @unknown default:
-                                        Circle()
-                                            .fill(Color(.quaternarySystemFill))
-                                    }
-                                }
-                                .frame(width: 34, height: 34)
-                                .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-
-                            VStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(viewModel.comments) { comment in
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .top, spacing: 10) {
                                 NavigationLink {
                                     if let mid = Int(comment.userID ?? "") {
                                         UserProfileView(mid: mid, username: comment.username)
@@ -864,81 +824,118 @@ struct VideoDetailView: View {
                                         UserSpaceWebView(userID: comment.userID, username: comment.username)
                                     }
                                 } label: {
-                                    Text(comment.username)
-                                        .font(.callout.weight(.semibold))
-                                        .foregroundStyle(.primary)
+                                    RemoteImageView(
+                                        url: comment.avatarURL,
+                                        maxPixelLength: 96,
+                                        placeholder: {
+                                            Circle()
+                                                .fill(Color(.quaternarySystemFill))
+                                        },
+                                        failureView: { _ in
+                                            Circle()
+                                                .fill(Color(.quaternarySystemFill))
+                                                .overlay {
+                                                    Image(systemName: "person.fill")
+                                                        .font(.system(size: 11))
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                        }
+                                    )
+                                    .frame(width: 34, height: 34)
+                                    .clipShape(Circle())
                                 }
                                 .buttonStyle(.plain)
 
-                                Text(comment.message)
-                                    .font(.body)
-                                    .foregroundStyle(.secondary)
-
-                                Text(comment.timeText)
-                                    .font(.footnote)
-                                    .foregroundStyle(.tertiary)
-
-                                if !comment.previewReplies.isEmpty {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        ForEach(comment.previewReplies, id: \.self) { reply in
-                                            Text("\(reply.username)：\(reply.message)")
-                                                .font(.footnote)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(2)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    NavigationLink {
+                                        if let mid = Int(comment.userID ?? "") {
+                                            UserProfileView(mid: mid, username: comment.username)
+                                        } else {
+                                            UserSpaceWebView(userID: comment.userID, username: comment.username)
                                         }
+                                    } label: {
+                                        Text(comment.username)
+                                            .font(.callout.weight(.semibold))
+                                            .foregroundStyle(.primary)
                                     }
-                                    .padding(10)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                }
+                                    .buttonStyle(.plain)
 
-                                HStack(spacing: 16) {
-                                    Label("回复", systemImage: "bubble.left")
+                                    Text(comment.message)
+                                        .font(.body)
+                                        .foregroundStyle(.secondary)
+
+                                    Text(comment.timeText)
                                         .font(.footnote)
                                         .foregroundStyle(.tertiary)
 
-                                    Label(statsText(comment.likeCount, fallback: "点赞"), systemImage: "hand.thumbsup")
-                                        .font(.footnote)
-                                        .foregroundStyle(.tertiary)
-
-                                    Spacer()
-
-                                    if comment.replyCount > 0 {
-                                        let isExpanded = expandedCommentReplies[comment.id] != nil
-                                        let canLoadMoreReplies = replyHasMore[comment.id] == true
-                                        Button(replyButtonTitle(for: comment, isExpanded: isExpanded, canLoadMore: canLoadMoreReplies)) {
-                                            Task {
-                                                await loadReplies(for: comment)
+                                    if !comment.previewReplies.isEmpty {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            ForEach(comment.previewReplies, id: \.self) { reply in
+                                                Text("\(reply.username)：\(reply.message)")
+                                                    .font(.footnote)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(2)
                                             }
                                         }
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
+                                        .padding(10)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     }
-                                }
-                                .padding(.top, 2)
 
-                                if let expandedReplies = expandedCommentReplies[comment.id], !expandedReplies.isEmpty {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        ForEach(expandedReplies, id: \.self) { reply in
-                                            Text("\(reply.username)：\(reply.message)")
-                                                .font(.footnote)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(3)
+                                    HStack(spacing: 16) {
+                                        Label("回复", systemImage: "bubble.left")
+                                            .font(.footnote)
+                                            .foregroundStyle(.tertiary)
+
+                                        Label(statsText(comment.likeCount, fallback: "点赞"), systemImage: "hand.thumbsup")
+                                            .font(.footnote)
+                                            .foregroundStyle(.tertiary)
+
+                                        Spacer()
+
+                                        if comment.replyCount > 0 {
+                                            let isExpanded = expandedCommentReplies[comment.id] != nil
+                                            let canLoadMoreReplies = replyHasMore[comment.id] == true
+                                            Button(replyButtonTitle(for: comment, isExpanded: isExpanded, canLoadMore: canLoadMoreReplies)) {
+                                                Task {
+                                                    await loadReplies(for: comment)
+                                                }
+                                            }
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
                                         }
                                     }
-                                    .padding(10)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .padding(.top, 2)
+
+                                    if let expandedReplies = expandedCommentReplies[comment.id], !expandedReplies.isEmpty {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            ForEach(expandedReplies, id: \.self) { reply in
+                                                Text("\(reply.username)：\(reply.message)")
+                                                    .font(.footnote)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(3)
+                                            }
+                                        }
+                                        .padding(10)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    }
                                 }
+
+                                Spacer()
                             }
 
-                            Spacer()
+                            Divider()
                         }
+                        .onAppear {
+                            guard comment.id == viewModel.comments.last?.id else {
+                                return
+                            }
 
-                        Divider()
-                    }
-                    .task {
-                        await loadMoreCommentsIfNeeded(currentComment: comment)
+                            Task {
+                                await loadMoreCommentsIfNeeded(currentComment: comment)
+                            }
+                        }
                     }
                 }
 
@@ -981,19 +978,14 @@ struct VideoDetailView: View {
     private var currentUserAvatarView: some View {
         Group {
             if let avatarURL = authManager.avatarURL {
-                AsyncImage(url: avatarURL) { phase in
-                    switch phase {
-                    case .empty:
+                RemoteImageView(
+                    url: avatarURL,
+                    maxPixelLength: 80,
+                    placeholder: {
                         Circle()
                             .fill(Color(.quaternarySystemFill))
-                            .overlay {
-                                ProgressView()
-                            }
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
+                    },
+                    failureView: { _ in
                         Circle()
                             .fill(Color(.quaternarySystemFill))
                             .overlay {
@@ -1001,11 +993,8 @@ struct VideoDetailView: View {
                                     .font(.system(size: 10))
                                     .foregroundStyle(.secondary)
                             }
-                    @unknown default:
-                        Circle()
-                            .fill(Color(.quaternarySystemFill))
                     }
-                }
+                )
             } else {
                 Circle()
                     .fill(Color(.quaternarySystemFill))
@@ -1026,6 +1015,7 @@ struct VideoDetailView: View {
         HStack(spacing: 10) {
             RemoteImageView(
                 url: coverURL,
+                maxPixelLength: 260,
                 placeholder: {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color(.quaternarySystemFill))
@@ -1151,14 +1141,6 @@ struct VideoDetailView: View {
             Color(.secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
         )
-    }
-
-    // MARK: - Player
-
-    private func configurePlayer(for url: URL?) {
-        player?.pause()
-        player = nil
-        playerURL = nil
     }
 
     // MARK: - Actions
@@ -1297,11 +1279,17 @@ struct VideoDetailView: View {
         }
     }
 
+    private func handlePlaybackPositionChange(_ position: Double) {
+        playbackProgress.position = position
+        savePlaybackHistoryIfNeeded()
+    }
+
     private func savePlaybackHistoryIfNeeded(force: Bool = false) {
-        let currentPercent = Int((playbackPosition * 100).rounded(.down))
-        guard force || playbackPosition >= 0.98 || abs(currentPercent - lastSavedPlaybackPercent) >= 3 else { return }
-        lastSavedPlaybackPercent = currentPercent
-        VideoPlaybackHistoryStore.save(videoID: viewModel.playbackItem.id, position: playbackPosition)
+        let position = playbackProgress.position
+        let currentPercent = Int((position * 100).rounded(.down))
+        guard force || position >= 0.98 || abs(currentPercent - playbackProgress.lastSavedPercent) >= 3 else { return }
+        playbackProgress.lastSavedPercent = currentPercent
+        VideoPlaybackHistoryStore.save(videoID: viewModel.playbackItem.id, position: position)
     }
 
     private func loadReplies(for comment: VideoComment) async {
@@ -1356,6 +1344,11 @@ struct VideoDetailView: View {
         return String(value)
     }
 
+}
+
+private final class VideoPlaybackProgressTracker {
+    var position: Double = 0
+    var lastSavedPercent = -1
 }
 
 private enum DetailTab: Hashable {

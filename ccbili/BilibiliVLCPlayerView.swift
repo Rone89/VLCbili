@@ -43,8 +43,6 @@ struct BilibiliVLCPlayerView: View {
     @State private var hasAppeared = false
     @State private var shouldResumeAfterVisibilityReturn = false
     @State private var isPlayerLayerDetachedForFullscreen = false
-    @State private var lastHandledFullscreenOrientation: UIDeviceOrientation = .unknown
-    private let diagnosticsTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(
         source: PlayableVideoSource,
@@ -74,7 +72,7 @@ struct BilibiliVLCPlayerView: View {
             .animation(.easeInOut(duration: 0.25), value: isFullscreenPresented)
             .background(
                 Group {
-                    if enablesAutoFullscreen {
+                    if enablesAutoFullscreen && !shouldUseNativePlayer {
                         FullscreenPlayerWindowPresenter(
                             isPresented: isFullscreenPresented,
                             orientation: fullscreenOrientation,
@@ -94,7 +92,6 @@ struct BilibiliVLCPlayerView: View {
             )
         .onAppear {
             showControlsTemporarily()
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             schedulePendingSeekIfNeeded()
             if hasAppeared {
                 resumeAfterVisibilityReturn()
@@ -103,7 +100,7 @@ struct BilibiliVLCPlayerView: View {
         }
         .onReceive(playbackState.$position) { position in
             onPositionChange(position)
-            if position > 0 || playbackState.isPlaying {
+            if !didReceiveFirstProgress && (position > 0 || playbackState.isPlaying) {
                 didReceiveFirstProgress = true
             }
         }
@@ -118,26 +115,13 @@ struct BilibiliVLCPlayerView: View {
             showControlsTemporarily()
             schedulePendingSeekIfNeeded()
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-            guard enablesAutoFullscreen else {
-                return
-            }
+        .task(id: isPlaybackDiagnosticsEnabled) {
+            guard isPlaybackDiagnosticsEnabled else { return }
 
-            let orientation = UIDevice.current.orientation
-
-            if orientation == .landscapeLeft || orientation == .landscapeRight {
-                guard !isFullscreenPresented || orientation != lastHandledFullscreenOrientation else { return }
-                lastHandledFullscreenOrientation = orientation
-                fullscreenOrientation = orientation
-                isFullscreenPresented = true
-            } else if orientation == .portrait || orientation == .portraitUpsideDown {
-                guard isFullscreenPresented else { return }
-                lastHandledFullscreenOrientation = .unknown
-                isFullscreenPresented = false
+            while !Task.isCancelled {
+                hlsDiagnosticsText = HLSPlaybackDiagnostics.shared.summary
+                try? await Task.sleep(for: .seconds(1))
             }
-        }
-        .onReceive(diagnosticsTimer) { _ in
-            hlsDiagnosticsText = HLSPlaybackDiagnostics.shared.summary
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
@@ -341,11 +325,11 @@ struct BilibiliVLCPlayerView: View {
     }
 
     private var shouldUseNativePlayer: Bool {
-        currentSource.isDASHSeparated || (currentSource.quality ?? 0) <= 80
+        true
     }
 
     private var shouldUseCustomControls: Bool {
-        true
+        false
     }
 
     private func debugText(base: String) -> String {
@@ -597,6 +581,29 @@ final class BilibiliVLCPlaybackState: ObservableObject {
         durationText = "00:00"
         isPlaying = false
         isScrubbing = false
+    }
+
+    func updatePlayback(
+        position newPosition: Double?,
+        elapsedText newElapsedText: String,
+        durationText newDurationText: String,
+        isPlaying newIsPlaying: Bool
+    ) {
+        if let newPosition, abs(position - newPosition) >= 0.002 {
+            position = newPosition
+        }
+
+        if elapsedText != newElapsedText {
+            elapsedText = newElapsedText
+        }
+
+        if durationText != newDurationText {
+            durationText = newDurationText
+        }
+
+        if isPlaying != newIsPlaying {
+            isPlaying = newIsPlaying
+        }
     }
 }
 
@@ -1070,7 +1077,8 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
 
             let asset = AVURLAsset(url: source.url, options: assetOptions(headers: source.headers))
             let item = AVPlayerItem(asset: asset)
-            item.preferredForwardBufferDuration = 2
+            item.preferredForwardBufferDuration = 3
+            player.automaticallyWaitsToMinimizeStalling = true
             player.replaceCurrentItem(with: item)
             addTimeObserver()
             player.play()
@@ -1162,8 +1170,9 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
         }
 
         private func addTimeObserver() {
+            removeTimeObserver()
             timeObserver = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
+                forInterval: CMTime(seconds: 1, preferredTimescale: 600),
                 queue: .main
             ) { [weak self] _ in
                 self?.updatePlaybackState()
@@ -1181,19 +1190,26 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
             guard let playbackState else { return }
             let currentTime = player.currentTime().seconds
             let duration = player.currentItem?.duration.seconds ?? 0
+            let isPlaying = player.timeControlStatus == .playing
 
+            let position: Double?
             if let pendingSeekPosition = playbackState.pendingSeekPosition {
-                playbackState.position = pendingSeekPosition
+                position = pendingSeekPosition
             } else if !playbackState.isScrubbing {
                 if duration.isFinite, duration > 0, currentTime.isFinite {
-                    playbackState.position = max(0, min(1, currentTime / duration))
+                    position = max(0, min(1, currentTime / duration))
                 } else {
-                    playbackState.position = 0
+                    position = 0
                 }
+            } else {
+                position = nil
             }
-            playbackState.elapsedText = Self.format(seconds: currentTime)
-            playbackState.durationText = Self.format(seconds: duration)
-            playbackState.isPlaying = player.timeControlStatus == .playing
+            playbackState.updatePlayback(
+                position: position,
+                elapsedText: Self.format(seconds: currentTime),
+                durationText: Self.format(seconds: duration),
+                isPlaying: isPlaying
+            )
         }
 
         fileprivate static func format(seconds: TimeInterval) -> String {
