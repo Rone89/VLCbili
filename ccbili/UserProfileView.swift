@@ -131,7 +131,8 @@ struct UserProfileView: View {
                                 title: item.title,
                                 subtitle: item.subtitle,
                                 accessoryText: item.bvid,
-                                coverURL: item.coverURL
+                                coverURL: item.coverURL,
+                                layoutStyle: .homeCard
                             )
                         }
                         .buttonStyle(.plain)
