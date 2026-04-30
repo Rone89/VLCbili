@@ -1,27 +1,28 @@
-# v0.1.129 - 修复横屏黑屏
+# v0.1.130 - DASH 秒开 HLS Manifest 核心
 
 ## 更新内容
 
-- 修复旋转横屏进入 AVKit 全屏时出现黑屏的问题。
-- 全屏弹出前只放开播放器需要的横竖屏方向权限，不再提前把整个 Scene 限死到单一横屏方向。
-- 等 `AVPlayerViewController` 确认已经全屏呈现后，再切换到目标横屏方向，避免播放器视图在转场前被系统重排成黑画面。
-- 增加全屏弹出失败回滚：如果系统没有成功呈现播放器，会自动挂回竖屏内嵌播放器并恢复播放状态。
-- 继续沿用同一个 `AVPlayer` 和同一个 `AVPlayerViewController`，不重建播放器、不重置播放进度。
+- 新增轻量 `generateHLSManifest(...) -> String` 核心函数，把 DASH fMP4 元数据动态映射为 HLS m3u8 字符串。
+- 使用 `#EXT-X-MAP` 映射 DASH 初始化片段，解决 AVPlayer 无法加载 fMP4 头文件的问题。
+- 强制输出 `#EXT-X-VERSION:7`，满足 CMAF/fMP4 播放要求。
+- Master Playlist 根据 HDR/杜比/HDR 中文清晰度标记自动追加 `VIDEO-RANGE=PQ`。
+- 所有 playlist URL 和 segment URL 均校验为绝对 URL，避免 AVPlayer 解析相对路径失败。
+- 现有 DASH-to-HLS 本地代理已改为调用新生成器，继续用本地 HTTP 服务动态托管 m3u8。
 
-## 原因说明
+## 性能说明
 
-上一版为了避免“竖屏页面和横屏播放器叠在一起”，在播放器弹出前就把 App 支持方向缩成了单一横屏。部分设备上 AVKit 还没完成全屏接管时，系统已经开始用横屏几何重排被移出内嵌容器的播放器视图，结果全屏层只剩黑底。现在改成先允许横竖屏共存，等全屏完成后再锁定实际横屏。
+- 字符串拼接只在 async DASH 取流路径里执行，不放到 SwiftUI 主线程。
+- 预分配 playlist 行数组容量，避免频繁扩容。
+- 视频和音频 SIDX 分片仍并发解析，减少首帧前等待。
+
+## 同步说明
+
+- 视频和音频分别生成独立 media playlist，由 master playlist 通过 `EXT-X-MEDIA` 绑定。
+- 分片时长直接来自 SIDX timescale，避免手写时长导致音画漂移。
+- fMP4 头通过 `EXT-X-MAP` + byte range 指向原始初始化区间，避免 AVPlayer 找不到 moov/moof 头。
 
 ## 打包说明
 
 - GitHub Actions 会构建 Release 配置的未签名 IPA。
 - 生成的 `ccbili-unsigned.ipa` 会作为 Release 附件上传。
 - 未签名 IPA 需要自行重签名后安装到真机。
-
-## 验证建议
-
-- 竖屏进入视频详情页并开始播放。
-- 旋转到横屏，确认直接进入横屏全屏且画面正常显示。
-- 横屏期间确认播放不中断、进度不跳回。
-- 旋回竖屏，确认播放器回到详情页内嵌位置继续播放。
-- 连续横竖屏切换多次，确认不黑屏、不暂停、不重复添加 overlay。

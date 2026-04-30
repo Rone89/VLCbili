@@ -41,15 +41,15 @@ struct DashHLSManifestService {
         let videoPlaylist = mediaPlaylist(
             mediaURL: proxiedVideoURL,
             initRange: videoInitRange,
-            indexRange: videoIndexRange,
-            segments: parsedVideoSegments
+            segments: parsedVideoSegments,
+            videoQuality: videoQualityText(for: source)
         )
 
         let audioPlaylist = mediaPlaylist(
             mediaURL: proxiedAudioURL,
             initRange: audioInitRange,
-            indexRange: audioIndexRange,
-            segments: parsedAudioSegments
+            segments: parsedAudioSegments,
+            videoQuality: "SDR"
         )
 
         let videoPlaylistURL = try LocalHLSProxyServer.shared.registerPlaylist(videoPlaylist, name: "video.m3u8")
@@ -58,8 +58,7 @@ struct DashHLSManifestService {
         let masterPlaylist = masterPlaylist(
             source: source,
             videoPlaylistURL: videoPlaylistURL,
-            audioPlaylistURL: audioPlaylistURL,
-            segments: parsedVideoSegments
+            audioPlaylistURL: audioPlaylistURL
         )
 
         let masterURL = try LocalHLSProxyServer.shared.registerPlaylist(masterPlaylist, name: "master.m3u8")
@@ -100,55 +99,43 @@ struct DashHLSManifestService {
     private func mediaPlaylist(
         mediaURL: URL,
         initRange: ByteRange,
-        indexRange: ByteRange,
-        segments: [HLSSegment]
+        segments: [HLSSegment],
+        videoQuality: String
     ) -> String {
-        let escapedURL = mediaURL.absoluteString.replacingOccurrences(of: "\"", with: "%22")
-        let targetDuration = max(1, Int(ceil(segments.map(\.duration).max() ?? 1)))
-        var lines = [
-            "#EXTM3U",
-            "#EXT-X-VERSION:7",
-            "#EXT-X-PLAYLIST-TYPE:VOD",
-            "#EXT-X-TARGETDURATION:\(targetDuration)",
-            "#EXT-X-MEDIA-SEQUENCE:0",
-            "#EXT-X-INDEPENDENT-SEGMENTS",
-            "#EXT-X-MAP:URI=\"\(escapedURL)\",BYTERANGE=\"\(initRange.length)@\(initRange.offset)\""
-        ]
-
-        for segment in segments {
-            lines.append("#EXTINF:\(String(format: "%.6f", segment.duration)),")
-            lines.append("#EXT-X-BYTERANGE:\(segment.range.length)@\(segment.range.offset)")
-            lines.append(escapedURL)
-        }
-        lines.append("#EXT-X-ENDLIST")
-        return lines.joined(separator: "\n") + "\n"
+        generateHLSManifest(
+            initUrl: mediaURL.absoluteString,
+            initByteRange: DASHHLSByteRange(offset: initRange.offset, length: initRange.length),
+            segments: segments.map { segment in
+                DASHHLSSegment(
+                    url: mediaURL.absoluteString,
+                    duration: segment.duration,
+                    byteRange: DASHHLSByteRange(offset: segment.range.offset, length: segment.range.length)
+                )
+            },
+            videoQuality: videoQuality
+        )
     }
 
     private func masterPlaylist(
         source: PlayableVideoSource,
         videoPlaylistURL: URL,
-        audioPlaylistURL: URL,
-        segments: [HLSSegment]
+        audioPlaylistURL: URL
     ) -> String {
-        let bandwidth = max(source.bandwidth ?? 2_000_000, 256_000)
-        let resolution = resolutionText(width: source.width, height: source.height)
-        let frameRate = normalizedFrameRate(source.frameRate)
         let codecs = [source.videoCodec, source.audioCodec]
             .compactMap { $0?.isEmpty == false ? $0 : nil }
             .joined(separator: ",")
 
-        var streamInfo = "BANDWIDTH=\(bandwidth),AUDIO=\"audio\""
-        if let resolution { streamInfo += ",RESOLUTION=\(resolution)" }
-        if let frameRate { streamInfo += ",FRAME-RATE=\(frameRate)" }
-        if !codecs.isEmpty { streamInfo += ",CODECS=\"\(codecs)\"" }
-
-        return """
-        #EXTM3U
-        #EXT-X-VERSION:7
-        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="DASH Audio",DEFAULT=YES,AUTOSELECT=YES,URI="\(audioPlaylistURL.absoluteString)"
-        #EXT-X-STREAM-INF:\(streamInfo)
-        \(videoPlaylistURL.absoluteString)
-        """
+        return generateHLSMasterManifest(
+            audioPlaylistURL: audioPlaylistURL,
+            videoVariant: HLSManifestVariant(
+                playlistURL: videoPlaylistURL,
+                bandwidth: source.bandwidth ?? 2_000_000,
+                resolution: resolutionText(width: source.width, height: source.height),
+                frameRate: normalizedFrameRate(source.frameRate),
+                codecs: codecs.isEmpty ? nil : codecs,
+                videoQuality: videoQualityText(for: source)
+            )
+        )
     }
 
     private func byteRange(from text: String?) -> ByteRange? {
@@ -166,6 +153,22 @@ struct DashHLSManifestService {
     private func normalizedFrameRate(_ value: String?) -> String? {
         guard let value, let doubleValue = Double(value), doubleValue > 0 else { return nil }
         return String(format: "%.3f", doubleValue)
+    }
+
+    private func videoQualityText(for source: PlayableVideoSource) -> String {
+        if let qualityDescription = source.qualityDescription {
+            return qualityDescription
+        }
+        switch source.quality {
+        case 125:
+            return "HDR"
+        case 126:
+            return "DolbyVision"
+        case 120:
+            return "4K"
+        default:
+            return "SDR"
+        }
     }
 
 }
