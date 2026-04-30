@@ -1343,9 +1343,9 @@ private extension View {
     func detailContainerGlass(cornerRadius: CGFloat, interactive: Bool = false) -> some View {
         if #available(iOS 26, *) {
             if interactive {
-                self.glassEffect(.regular.tint(Color.white.opacity(0.12)).interactive(), in: .rect(cornerRadius: cornerRadius))
+                self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
             } else {
-                self.glassEffect(.regular.tint(Color.white.opacity(0.12)), in: .rect(cornerRadius: cornerRadius))
+                self.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
             }
         } else {
             self
