@@ -20,6 +20,7 @@ struct VideoDetailView: View {
     @State private var commentSortMode: CommentSortMode = .hot
     @State private var videoAspectRatio: CGFloat = 16 / 9
     @State private var restoredPlaybackPosition: Double?
+    @State private var commentsSheetHeight: CGFloat = 360
     @State private var isShowingCommentsSheet = false
     @State private var selectedReplySheet: CommentReplySheetSelection?
     @State private var isLoadingComments = false
@@ -44,6 +45,8 @@ struct VideoDetailView: View {
             let contentWidth = max(proxy.size.width - pageHorizontalInset * 2, 0)
             let playerWidth = proxy.size.width
             let playerHeight = min(playerWidth / videoAspectRatio, proxy.size.height * 0.7)
+            let reservedTopHeight = playerHeight + proxy.safeAreaInsets.top + 96
+            let availableCommentsHeight = max(proxy.size.height - reservedTopHeight - proxy.safeAreaInsets.bottom, 160)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     playerCardSection(height: playerHeight)
@@ -68,6 +71,12 @@ struct VideoDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
             .background(Color(.systemGroupedBackground))
+            .onAppear {
+                commentsSheetHeight = availableCommentsHeight
+            }
+            .onChange(of: availableCommentsHeight) { _, newValue in
+                commentsSheetHeight = newValue
+            }
         }
         .navigationTitle("视频详情")
         .navigationBarTitleDisplayMode(.inline)
@@ -110,8 +119,11 @@ struct VideoDetailView: View {
         }
         .sheet(isPresented: $isShowingCommentsSheet) {
             commentsSheet
-                .presentationDetents([.large])
+                .presentationDetents([.height(commentsSheetHeight)])
                 .presentationDragIndicator(.visible)
+                .presentationBackground(.clear)
+                .presentationCornerRadius(30)
+                .presentationBackgroundInteraction(.enabled)
         }
         .onDisappear {
             savePlaybackHistoryIfNeeded(force: true)
@@ -641,23 +653,23 @@ struct VideoDetailView: View {
             .padding(.horizontal, 14)
             .frame(height: 48)
             .frame(maxWidth: .infinity)
-            .background(
-                Color(.secondarySystemGroupedBackground),
-                in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                    .strokeBorder(Color(.separator).opacity(0.08), lineWidth: 0.5)
-            }
+            .commentLiquidGlass(cornerRadius: cardCornerRadius, interactive: true)
         }
         .buttonStyle(.plain)
     }
 
     private var commentsSheet: some View {
         NavigationStack {
-            commentsContent
+            ScrollView {
+                commentsContent
+                    .padding(.horizontal, pageHorizontalInset)
+                    .padding(.top, 12)
+                    .padding(.bottom, 24)
+            }
+            .background(Color.clear)
                 .navigationTitle("评论")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("关闭") {
@@ -682,6 +694,11 @@ struct VideoDetailView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
                 }
+        }
+        .background {
+            Color.clear
+                .commentLiquidGlass(cornerRadius: 30)
+                .ignoresSafeArea()
         }
     }
 
@@ -776,10 +793,7 @@ struct VideoDetailView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(
-                        Color(.tertiarySystemGroupedBackground),
-                        in: Capsule()
-                    )
+                    .commentLiquidGlass(cornerRadius: 999, interactive: true)
                 }
                 .buttonStyle(.plain)
             }
@@ -804,10 +818,7 @@ struct VideoDetailView: View {
                     }
                     .padding(.horizontal, 12)
                     .frame(height: 38)
-                    .background(
-                        Color(.tertiarySystemGroupedBackground),
-                        in: Capsule()
-                    )
+                    .commentLiquidGlass(cornerRadius: 999, interactive: true)
                 }
             }
             .buttonStyle(.plain)
@@ -976,10 +987,7 @@ struct VideoDetailView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color(.secondarySystemGroupedBackground),
-            in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-        )
+        .commentLiquidGlass(cornerRadius: cardCornerRadius)
     }
 
     private var currentUserAvatarView: some View {
@@ -1504,6 +1512,26 @@ private enum CommentSortMode: CaseIterable {
             return 1
         case .latest:
             return 2
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func commentLiquidGlass(cornerRadius: CGFloat, interactive: Bool = false) -> some View {
+        if #available(iOS 26, *) {
+            if interactive {
+                self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+            } else {
+                self.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+            }
+        } else {
+            self
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color(.separator).opacity(0.08), lineWidth: 0.5)
+                }
         }
     }
 }
