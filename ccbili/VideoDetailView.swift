@@ -2,6 +2,7 @@ import SwiftUI
 
 struct VideoDetailView: View {
     @Environment(AuthManager.self) private var authManager
+    @Environment(\.dismiss) private var dismiss
 
     @State private var viewModel: VideoDetailViewModel
     @State private var favoriteViewModel = VideoFavoriteViewModel()
@@ -33,6 +34,9 @@ struct VideoDetailView: View {
     private let replyService = ReplyService()
     private let cardCornerRadius: CGFloat = 18
     private let pageHorizontalInset: CGFloat = 16
+    private let commentsSheetTopGap: CGFloat = 12
+    private let rightSwipeBackMinimumDistance: CGFloat = 72
+    private let rightSwipeBackHorizontalRatio: CGFloat = 1.6
 
     init(item: VideoItem) {
         _viewModel = State(initialValue: VideoDetailViewModel(item: item))
@@ -43,9 +47,10 @@ struct VideoDetailView: View {
             let contentWidth = max(proxy.size.width - pageHorizontalInset * 2, 0)
             let playerWidth = proxy.size.width
             let playerHeight = min(playerWidth / videoAspectRatio, proxy.size.height * 0.7)
-            let playerTopInset = proxy.safeAreaInsets.top
-            let commentsAvailableHeight = proxy.size.height - playerTopInset - playerHeight - proxy.safeAreaInsets.bottom - 8
-            let availableCommentsHeight = max(commentsAvailableHeight, 160)
+            let containerFrame = proxy.frame(in: .global)
+            let playerBottomY = containerFrame.minY + playerHeight
+            let commentsAvailableHeight = containerFrame.maxY - playerBottomY - commentsSheetTopGap
+            let availableCommentsHeight = max(commentsAvailableHeight, 1)
             ZStack(alignment: .top) {
                 playerCardSection(height: playerHeight)
                     .frame(width: playerWidth)
@@ -73,6 +78,8 @@ struct VideoDetailView: View {
                 .zIndex(1)
             }
             .background(Color(.systemGroupedBackground))
+            .contentShape(Rectangle())
+            .simultaneousGesture(rightSwipeBackGesture(playerBottomY: playerHeight))
             .onAppear {
                 commentsSheetHeight = availableCommentsHeight
             }
@@ -133,6 +140,21 @@ struct VideoDetailView: View {
             savePlaybackHistoryIfNeeded(force: true)
             AppOrientationController.lockPortraitForPage()
         }
+    }
+
+    private func rightSwipeBackGesture(playerBottomY: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 24, coordinateSpace: .local)
+            .onEnded { value in
+                guard !isShowingCommentsSheet else { return }
+                guard value.startLocation.y >= playerBottomY else { return }
+
+                let horizontalDistance = value.translation.width
+                let verticalDistance = abs(value.translation.height)
+                guard horizontalDistance > rightSwipeBackMinimumDistance else { return }
+                guard horizontalDistance > verticalDistance * rightSwipeBackHorizontalRatio else { return }
+
+                dismiss()
+            }
     }
 
     // MARK: - Player
