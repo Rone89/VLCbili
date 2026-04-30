@@ -73,7 +73,7 @@ struct VideoDetailView: View {
                 }
                 .zIndex(1)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Color(.systemGroupedBackground).opacity(0.62))
             .onAppear {
                 commentsSheetHeight = availableCommentsHeight
             }
@@ -1341,49 +1341,19 @@ private enum CommentSortMode: CaseIterable {
 private extension View {
     @ViewBuilder
     func detailContainerGlass(cornerRadius: CGFloat, interactive: Bool = false) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-
-        if #available(iOS 26, *) {
-            self
-                .background(.regularMaterial, in: shape)
-                .overlay {
-                    shape
-                        .fill(Color(.secondarySystemBackground).opacity(0.18))
-                }
-                .overlay {
-                    shape
-                        .strokeBorder(Color(.separator).opacity(0.10), lineWidth: 0.5)
-                }
-                .modifier(
-                    NativeDetailGlassEffect(
-                        cornerRadius: cornerRadius,
-                        interactive: interactive
-                    )
-                )
-        } else {
-            self
-                .background(.regularMaterial, in: shape)
-                .overlay {
-                    shape
-                        .strokeBorder(Color(.separator).opacity(0.10), lineWidth: 0.5)
-                }
-        }
-    }
-}
-
-private struct NativeDetailGlassEffect: ViewModifier {
-    let cornerRadius: CGFloat
-    let interactive: Bool
-
-    func body(content: Content) -> some View {
         if #available(iOS 26, *) {
             if interactive {
-                content.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+                self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
             } else {
-                content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+                self.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
             }
         } else {
-            content
+            self
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color(.separator).opacity(0.08), lineWidth: 0.5)
+                }
         }
     }
 }
