@@ -29,14 +29,20 @@ private final class PopGestureRestoringViewController: UIViewController {
     }
 
     func restoreInteractivePopGesture() {
-        guard
-            let navigationController = navigationController,
-            let interactivePopGestureRecognizer = navigationController.interactivePopGestureRecognizer
-        else { return }
+        guard let navigationController = navigationController else { return }
 
         gestureDelegate.navigationController = navigationController
-        interactivePopGestureRecognizer.delegate = gestureDelegate
-        interactivePopGestureRecognizer.isEnabled = true
+
+        if let edgePopGestureRecognizer = navigationController.interactivePopGestureRecognizer {
+            edgePopGestureRecognizer.delegate = gestureDelegate
+            edgePopGestureRecognizer.isEnabled = true
+        }
+
+        if #available(iOS 26, *),
+           let contentPopGestureRecognizer = navigationController.interactiveContentPopGestureRecognizer {
+            contentPopGestureRecognizer.delegate = gestureDelegate
+            contentPopGestureRecognizer.isEnabled = true
+        }
     }
 }
 

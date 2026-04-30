@@ -2,7 +2,6 @@ import SwiftUI
 
 struct VideoDetailView: View {
     @Environment(AuthManager.self) private var authManager
-    @Environment(\.dismiss) private var dismiss
 
     @State private var viewModel: VideoDetailViewModel
     @State private var favoriteViewModel = VideoFavoriteViewModel()
@@ -19,7 +18,6 @@ struct VideoDetailView: View {
     @State private var likeErrorMessage: String?
     @State private var coinErrorMessage: String?
     @State private var commentSortMode: CommentSortMode = .hot
-    @State private var videoAspectRatio: CGFloat = 16 / 9
     @State private var restoredPlaybackPosition: Double?
     @State private var commentsSheetHeight: CGFloat = 360
     @State private var isShowingCommentsSheet = false
@@ -34,9 +32,8 @@ struct VideoDetailView: View {
     private let replyService = ReplyService()
     private let cardCornerRadius: CGFloat = 18
     private let pageHorizontalInset: CGFloat = 16
+    private let playerAspectRatio: CGFloat = 16 / 9
     private let commentsSheetTopGap: CGFloat = 12
-    private let rightSwipeBackMinimumDistance: CGFloat = 72
-    private let rightSwipeBackHorizontalRatio: CGFloat = 1.6
 
     init(item: VideoItem) {
         _viewModel = State(initialValue: VideoDetailViewModel(item: item))
@@ -46,7 +43,7 @@ struct VideoDetailView: View {
         GeometryReader { proxy in
             let contentWidth = max(proxy.size.width - pageHorizontalInset * 2, 0)
             let playerWidth = proxy.size.width
-            let playerHeight = min(playerWidth / videoAspectRatio, proxy.size.height * 0.7)
+            let playerHeight = min(playerWidth / playerAspectRatio, proxy.size.height * 0.7)
             let containerFrame = proxy.frame(in: .global)
             let playerBottomY = containerFrame.minY + playerHeight
             let commentsAvailableHeight = containerFrame.maxY - playerBottomY - commentsSheetTopGap
@@ -78,8 +75,6 @@ struct VideoDetailView: View {
                 .zIndex(1)
             }
             .background(Color(.systemGroupedBackground))
-            .contentShape(Rectangle())
-            .simultaneousGesture(rightSwipeBackGesture(playerBottomY: playerHeight))
             .onAppear {
                 commentsSheetHeight = availableCommentsHeight
             }
@@ -114,13 +109,6 @@ struct VideoDetailView: View {
                 await authManager.refreshLoginStatus()
             }
         }
-        .refreshable {
-            await viewModel.load()
-            if isShowingCommentsSheet {
-                await reloadComments(sortMode: commentSortMode)
-            }
-            favoriteViewModel.load(videoID: viewModel.playbackItem.id)
-        }
         .onChange(of: commentSortMode) { _, newValue in
             guard isShowingCommentsSheet else { return }
 
@@ -142,21 +130,6 @@ struct VideoDetailView: View {
         }
     }
 
-    private func rightSwipeBackGesture(playerBottomY: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 24, coordinateSpace: .local)
-            .onEnded { value in
-                guard !isShowingCommentsSheet else { return }
-                guard value.startLocation.y >= playerBottomY else { return }
-
-                let horizontalDistance = value.translation.width
-                let verticalDistance = abs(value.translation.height)
-                guard horizontalDistance > rightSwipeBackMinimumDistance else { return }
-                guard horizontalDistance > verticalDistance * rightSwipeBackHorizontalRatio else { return }
-
-                dismiss()
-            }
-    }
-
     // MARK: - Player
 
     private func playerCardSection(height: CGFloat) -> some View {
@@ -174,9 +147,6 @@ struct VideoDetailView: View {
                 initialPosition: restoredPlaybackPosition ?? playbackProgress.position,
                 onPositionChange: { position in
                     handlePlaybackPositionChange(position)
-                },
-                onVideoSizeChange: { videoSize in
-                    updateVideoAspectRatio(videoSize)
                 }
             )
                 .frame(maxWidth: .infinity)
@@ -257,19 +227,6 @@ struct VideoDetailView: View {
             }
         }
         .frame(height: height)
-    }
-
-    private func updateVideoAspectRatio(_ videoSize: CGSize) {
-        guard videoSize.width > 0, videoSize.height > 0 else {
-            return
-        }
-
-        let aspectRatio = videoSize.width / videoSize.height
-        guard aspectRatio.isFinite, abs(aspectRatio - videoAspectRatio) > 0.01 else {
-            return
-        }
-
-        videoAspectRatio = aspectRatio
     }
 
     // MARK: - Info
@@ -540,9 +497,6 @@ struct VideoDetailView: View {
                 }
                 .task {
                     guard viewModel.comments.isEmpty, !isLoadingComments else { return }
-                    await reloadComments(sortMode: commentSortMode)
-                }
-                .refreshable {
                     await reloadComments(sortMode: commentSortMode)
                 }
                 .sheet(item: $selectedReplySheet) { selection in
@@ -1292,9 +1246,6 @@ private struct CommentRepliesSheet: View {
             }
             .task {
                 await loadInitialRepliesIfNeeded()
-            }
-            .refreshable {
-                await reloadReplies()
             }
         }
     }
