@@ -48,10 +48,10 @@ struct VideoDetailView: View {
             let playerHeight = min(playerWidth / playerAspectRatio, proxy.size.height * 0.7)
             let commentsAvailableHeight = proxy.size.height - playerHeight - commentsSheetTopGap - proxy.safeAreaInsets.bottom
             let availableCommentsHeight = max(commentsAvailableHeight, 1)
-            ZStack(alignment: .top) {
+            VStack(spacing: 0) {
                 playerCardSection(height: playerHeight)
                     .frame(width: playerWidth)
-                    .zIndex(0)
+                    .zIndex(1)
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -68,12 +68,14 @@ struct VideoDetailView: View {
                             .frame(width: contentWidth)
                     }
                     .padding(.horizontal, pageHorizontalInset)
-                    .padding(.top, playerHeight + 12)
+                    .padding(.top, 12)
                     .padding(.bottom, 24)
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
-                .zIndex(1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .zIndex(0)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(Color(.systemGroupedBackground).opacity(0.62))
             .onAppear {
                 commentsSheetHeight = availableCommentsHeight
