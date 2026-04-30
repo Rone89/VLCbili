@@ -229,28 +229,52 @@ struct VideoDetailView: View {
     // MARK: - Info
 
     private var videoInfoSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            authorSummaryRow
+        VStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                authorSummaryRow
 
-            Text(viewModel.playbackItem.title)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.leading)
-                .lineLimit(nil)
+                videoTitleText
+
+                HStack(spacing: 8) {
+                    metaChip(systemImage: "play.rectangle", text: statsText(viewModel.stats.views, fallback: "播放数待接入"))
+                    metaChip(systemImage: "calendar", text: viewModel.uploadTimeText)
+                    qualityPicker
+                }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-
-            HStack(spacing: 8) {
-                metaChip(systemImage: "play.rectangle", text: statsText(viewModel.stats.views, fallback: "播放数待接入"))
-                metaChip(systemImage: "calendar", text: viewModel.uploadTimeText)
-                qualityPicker
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             actionSection
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .detailContainerGlass(cornerRadius: cardCornerRadius)
+    }
+
+    private var videoTitleText: some View {
+        Text(normalizedVideoTitle)
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.leading)
+            .lineLimit(nil)
+            .allowsTightening(true)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+    }
+
+    private var normalizedVideoTitle: String {
+        viewModel.playbackItem.title
+            .replacingOccurrences(
+                of: #"\s*[\r\n]+\s*"#,
+                with: "",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"[ \t]{2,}"#,
+                with: " ",
+                options: .regularExpression
+            )
     }
 
     private var authorSummaryRow: some View {
