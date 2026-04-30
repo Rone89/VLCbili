@@ -988,7 +988,7 @@ private final class PlayerLayerContainerView: UIView {
     }
 }
 
-private extension UIView {
+extension UIView {
     var inheritedAnimationDuration: TimeInterval {
         let duration = layer.animation(forKey: "bounds")?.duration ?? layer.animation(forKey: "position")?.duration ?? 0
         return duration > 0 ? duration : 0
