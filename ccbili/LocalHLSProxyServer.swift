@@ -13,24 +13,37 @@ final class LocalHLSProxyServer {
     private var routeCounter = 0
     private var playlists: [String: String] = [:]
     private var playlistCounter = 0
-    private var headers: [String: String] = [:]
 
     private init() {}
 
     func resetForForegroundPlayback() {
-        listener?.cancel()
-        listener = nil
-        listenerState = .setup
-        readyContinuations.removeAll()
+        queue.sync {
+            routes.removeAll()
+            routeCounter = 0
+            playlists.removeAll()
+            playlistCounter = 0
+
+            if case .failed = listenerState {
+                listener?.cancel()
+                listener = nil
+                listenerState = .setup
+            }
+
+            if case .cancelled = listenerState {
+                listener = nil
+                listenerState = .setup
+            }
+        }
     }
 
     func register(mediaURL: URL, headers: [String: String]) throws -> URL {
-        try startIfNeeded()
-        routeCounter += 1
-        let id = String(routeCounter)
-        routes[id] = Route(url: mediaURL)
-        self.headers = headers
-        return URL(string: "http://127.0.0.1:\(serverPort)/dash/\(id)")!
+        try queue.sync {
+            try startIfNeeded()
+            routeCounter += 1
+            let id = String(routeCounter)
+            routes[id] = Route(url: mediaURL, headers: headers)
+            return URL(string: "http://127.0.0.1:\(serverPort)/dash/\(id)")!
+        }
     }
 
     func waitUntilReady() async throws {
@@ -49,12 +62,14 @@ final class LocalHLSProxyServer {
     }
 
     func registerPlaylist(_ content: String, name: String) throws -> URL {
-        try startIfNeeded()
-        playlistCounter += 1
-        let safeName = name.replacingOccurrences(of: "/", with: "-")
-        let id = "\(playlistCounter)-\(safeName)"
-        playlists[id] = content
-        return URL(string: "http://127.0.0.1:\(serverPort)/hls/\(id)")!
+        try queue.sync {
+            try startIfNeeded()
+            playlistCounter += 1
+            let safeName = name.replacingOccurrences(of: "/", with: "-")
+            let id = "\(playlistCounter)-\(safeName)"
+            playlists[id] = content
+            return URL(string: "http://127.0.0.1:\(serverPort)/hls/\(id)")!
+        }
     }
 
     private func startIfNeeded() throws {
@@ -109,13 +124,11 @@ final class LocalHLSProxyServer {
                 self?.send(status: 400, body: Data(), connection: connection)
                 return
             }
-            Task {
-                await self.respond(to: request, connection: connection)
-            }
+            self.respond(to: request, connection: connection)
         }
     }
 
-    private func respond(to rawRequest: String, connection: NWConnection) async {
+    private func respond(to rawRequest: String, connection: NWConnection) {
         guard let requestLine = rawRequest.split(separator: "\r\n").first else {
             send(status: 400, body: Data(), connection: connection)
             return
@@ -123,6 +136,17 @@ final class LocalHLSProxyServer {
         let requestParts = requestLine.split(separator: " ")
         guard requestParts.count >= 2 else {
             send(status: 400, body: Data(), connection: connection)
+            return
+        }
+
+        let method = String(requestParts[0]).uppercased()
+        guard method == "GET" || method == "HEAD" else {
+            send(
+                status: 405,
+                headers: ["Allow": "GET, HEAD"],
+                body: Data(),
+                connection: connection
+            )
             return
         }
 
@@ -142,7 +166,8 @@ final class LocalHLSProxyServer {
                     "Cache-Control": "no-cache"
                 ],
                 body: Data(playlist.utf8),
-                connection: connection
+                connection: connection,
+                sendsBody: method != "HEAD"
             )
             return
         }
@@ -161,15 +186,16 @@ final class LocalHLSProxyServer {
         let rangeHeader = headerValue("Range", in: rawRequest)
         MediaRouteStreamer(
             route: route,
-            headers: enrichedHeaders(),
+            headers: enrichedHeaders(route.headers),
             rangeHeader: rangeHeader,
+            method: method,
             path: path,
             connection: connection
         )
         .start()
     }
 
-    private func enrichedHeaders() -> [String: String] {
+    private func enrichedHeaders(_ headers: [String: String]) -> [String: String] {
         var result = headers
         let cookies = HTTPCookieStorage.shared.cookies ?? []
         if let cookieHeader = HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], !cookieHeader.isEmpty {
@@ -191,7 +217,13 @@ final class LocalHLSProxyServer {
         return nil
     }
 
-    private func send(status: Int, headers: [String: String] = [:], body: Data, connection: NWConnection) {
+    private func send(
+        status: Int,
+        headers: [String: String] = [:],
+        body: Data,
+        connection: NWConnection,
+        sendsBody: Bool = true
+    ) {
         var statusText = "OK"
         if status == 206 { statusText = "Partial Content" }
         if status >= 400 { statusText = "Error" }
@@ -206,7 +238,9 @@ final class LocalHLSProxyServer {
         headerLines.append("")
         headerLines.append("")
         var response = Data(headerLines.joined(separator: "\r\n").utf8)
-        response.append(body)
+        if sendsBody {
+            response.append(body)
+        }
         connection.send(content: response, completion: .contentProcessed { _ in
             connection.cancel()
         })
@@ -214,12 +248,14 @@ final class LocalHLSProxyServer {
 
     private struct Route {
         let url: URL
+        let headers: [String: String]
     }
 
     private final class MediaRouteStreamer: NSObject, URLSessionDataDelegate {
         private let route: Route
         private let headers: [String: String]
         private let rangeHeader: String?
+        private let method: String
         private let path: String
         private let connection: NWConnection
         private let delegateQueue: OperationQueue
@@ -234,12 +270,14 @@ final class LocalHLSProxyServer {
             route: Route,
             headers: [String: String],
             rangeHeader: String?,
+            method: String,
             path: String,
             connection: NWConnection
         ) {
             self.route = route
             self.headers = headers
             self.rangeHeader = rangeHeader
+            self.method = method
             self.path = path
             self.connection = connection
             let delegateQueue = OperationQueue()
@@ -251,6 +289,7 @@ final class LocalHLSProxyServer {
             selfRetainer = self
 
             var request = URLRequest(url: route.url)
+            request.httpMethod = method
             request.timeoutInterval = 30
             for (key, value) in headers {
                 request.setValue(value, forHTTPHeaderField: key)
@@ -290,7 +329,26 @@ final class LocalHLSProxyServer {
             completionHandler(.allow)
         }
 
+        func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            var redirectedRequest = request
+            redirectedRequest.httpMethod = method
+            for (key, value) in headers {
+                redirectedRequest.setValue(value, forHTTPHeaderField: key)
+            }
+            if let rangeHeader {
+                redirectedRequest.setValue(rangeHeader, forHTTPHeaderField: "Range")
+            }
+            completionHandler(redirectedRequest)
+        }
+
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+            guard method != "HEAD" else { return }
             deliveredBytes += data.count
             connection.send(content: data, completion: .contentProcessed { _ in })
         }

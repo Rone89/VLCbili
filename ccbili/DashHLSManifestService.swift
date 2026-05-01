@@ -30,7 +30,7 @@ struct DashHLSManifestService {
         HLSPlaybackDiagnostics.shared.recordManifest(
             videoSegments: parsedVideoSegments.count,
             audioSegments: parsedAudioSegments.count,
-            targetDuration: max(1, Int(ceil(parsedVideoSegments.map(\.duration).max() ?? 1))),
+            targetDuration: targetDuration(for: parsedVideoSegments + parsedAudioSegments),
             videoIndex: source.videoIndexRange,
             audioIndex: source.audioIndexRange
         )
@@ -73,13 +73,23 @@ struct DashHLSManifestService {
     }
 
     private func rangeData(from url: URL, range: ByteRange, headers: [String: String]) async throws -> Data {
+        let enrichedHeaders = enrichedHeaders(headers)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpAdditionalHeaders = enrichedHeaders
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 60
+        let session = URLSession(configuration: configuration)
+        defer {
+            session.finishTasksAndInvalidate()
+        }
+
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
-        for (key, value) in enrichedHeaders(headers) {
+        for (key, value) in enrichedHeaders {
             request.setValue(value, forHTTPHeaderField: key)
         }
         request.setValue("bytes=\(range.offset)-\(range.offset + range.length - 1)", forHTTPHeaderField: "Range")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
             throw APIError.serverMessage("DASH HLS 索引段下载失败")
@@ -105,7 +115,7 @@ struct DashHLSManifestService {
         segments: [HLSSegment]
     ) -> String {
         let escapedURL = mediaURL.absoluteString.replacingOccurrences(of: "\"", with: "%22")
-        let targetDuration = max(1, Int(ceil(segments.map(\.duration).max() ?? 1)))
+        let targetDuration = targetDuration(for: segments)
         var lines = [
             "#EXTM3U",
             "#EXT-X-VERSION:7",
@@ -167,6 +177,10 @@ struct DashHLSManifestService {
     private func normalizedFrameRate(_ value: String?) -> String? {
         guard let value, let doubleValue = Double(value), doubleValue > 0 else { return nil }
         return String(format: "%.3f", doubleValue)
+    }
+
+    private func targetDuration(for segments: [HLSSegment]) -> Int {
+        max(1, Int(ceil(segments.map(\.duration).max() ?? 1)))
     }
 
 }
