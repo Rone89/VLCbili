@@ -1,13 +1,10 @@
 import SwiftUI
-import AVKit
 
 struct VideoDetailView: View {
     @Environment(AuthManager.self) private var authManager
 
     @State private var viewModel: VideoDetailViewModel
     @State private var favoriteViewModel = VideoFavoriteViewModel()
-    @State private var player: AVPlayer?
-    @State private var playerURL: URL?
     @State private var playbackPosition: Double = 0
 
     @State private var interactionService = VideoInteractionService()
@@ -106,8 +103,6 @@ struct VideoDetailView: View {
                 didLike = viewModel.viewerState.didLike
                 didCoin = viewModel.viewerState.didCoin
                 favoriteViewModel.isFavorite = viewModel.viewerState.didFavorite
-            } else {
-                configurePlayer(for: viewModel.playURL)
             }
 
             if authManager.isLoggedIn && authManager.avatarURL == nil {
@@ -118,9 +113,6 @@ struct VideoDetailView: View {
             await viewModel.load()
             favoriteViewModel.load(videoID: viewModel.playbackItem.id)
         }
-        .onChange(of: viewModel.playURL) { _, newValue in
-            configurePlayer(for: newValue)
-        }
         .onChange(of: commentSortMode) { _, newValue in
             Task {
                 await reloadComments(sortMode: newValue)
@@ -128,7 +120,6 @@ struct VideoDetailView: View {
         }
         .onDisappear {
             savePlaybackHistoryIfNeeded()
-            configurePlayer(for: nil)
             AppOrientationController.lock(.portrait)
         }
     }
@@ -1121,14 +1112,6 @@ struct VideoDetailView: View {
             Color(.secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
         )
-    }
-
-    // MARK: - Player
-
-    private func configurePlayer(for url: URL?) {
-        player?.pause()
-        player = nil
-        playerURL = nil
     }
 
     // MARK: - Actions

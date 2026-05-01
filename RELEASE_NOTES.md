@@ -1,16 +1,18 @@
-## 本版本说明
+## v0.1.153-202605011349
 
-### 修复问题
+### 主要变更
 
-- 重做视频详情页“播放状态联动滚动”实现：ScrollView 内只保留视频等高占位，真实播放器放到外层覆盖层。
-- 播放中滚动时，播放器使用占位视图的滚动 `minY` 动态计算外层 `offset`，稳定悬浮在顶部。
-- 暂停后播放器恢复使用占位视图的实时 `minY`，表现为跟随页面一起滚动并消失。
+- 将视频播放内核从系统 AVPlayer 切换为 MobileVLCKit / VLCMediaPlayer。
+- 保留现有播放控制、进度拖动、清晰度切换、播放历史恢复和横屏全屏体验。
+- DASH 分离音视频继续通过本地 HLS manifest/proxy 合成为 VLC 可播放入口，普通 DURL 也通过本地代理附带 B 站所需请求头。
+- 移除旧 AVPlayer 播放视图和未使用的 AVFoundation DASH 合成代码。
 
-### 技术说明
+### 构建说明
 
-- 旧版把播放器放在 ScrollView 内部再做 `.offset`，SwiftUI 布局和滚动复用时不稳定。
-- 新版等价于 UIKit 中“占位内容正常滚动，真实视频窗口根据 `contentOffset` 重算 `CGRect.origin.y`”。
+- 新增 CocoaPods 依赖：`MobileVLCKit 4.0.0a2`。
+- 本地首次构建需执行 `pod install`，之后使用 `ccbili.xcworkspace` 打开项目。
+- GitHub Actions 已切换为先安装 Pods，再使用 workspace 构建未签名 IPA。
 
-## 说明
+### 附件
 
-未签名 IPA 会作为 Release 附件上传，适合后续自行签名或侧载测试。
+Release 会附带未签名 IPA，适合后续自行签名或侧载测试。

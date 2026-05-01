@@ -35,9 +35,10 @@ jobs:
       - name: Resolve packages
         run: |
           set -euo pipefail
+          pod install --repo-update
           xcodebuild \
             -resolvePackageDependencies \
-            -project ccbili.xcodeproj \
+            -workspace ccbili.xcworkspace \
             -scheme ccbili \
             -derivedDataPath build
 
@@ -45,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild \
-            -project ccbili.xcodeproj \
+            -workspace ccbili.xcworkspace \
             -scheme ccbili \
             -configuration Release \
             -sdk iphoneos \

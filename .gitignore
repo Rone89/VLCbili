@@ -11,6 +11,9 @@ xcuserdata/
 .swiftpm/
 .build/
 
+# CocoaPods
+Pods/
+
 # Signing / secrets
 *.mobileprovision
 *.provisionprofile
