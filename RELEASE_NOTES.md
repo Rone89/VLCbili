@@ -1,14 +1,14 @@
-## v0.1.156-202605011450
+## v0.1.157-202605011824
 
 ### 修复
 
-- 将 1080P+ 等 DASH 分离音视频播放从本地 HLS master playlist 改为本地 DASH MPD manifest，交给 VLCKit/libVLC 原生 DASH 解析。
-- 本地 MPD 中的视频、音频 `BaseURL` 都走代理，继续补齐 B 站 CDN 需要的 Referer、Cookie、User-Agent、Range 等请求头。
-- 代理支持 `application/dash+xml` 清单响应，播放诊断会显示 MPD 的 range、时长和 codec 信息。
+- 1080P+ 等 DASH 分离音视频不再走 dash-to-hls 或本地 MPD，改为 VLCKit 主视频流加 `input-slave` 音频流，两个流仍通过本地代理补齐 B 站请求头。
+- 本地代理改为顺序写出响应头和媒体数据，等前一个数据块确认后再发送下一个，避免 720P/1080P DURL 播放节奏异常或提前收尾。
+- 初次默认清晰度改为 1080P 普通 DURL，已选择的 720P/480P 等低清晰度会被正确记住，不再被强制恢复到 1080P+。
 
 ### 说明
 
-VLCKit 不需要 dash-to-hls；但 B 站接口返回的是独立 video/audio m4s 地址，而不是一个可直接播放的 MPD 文件。本版本改为在本地生成 MPD，避免 VLC 一直反复读取 HLS master 却不进入分片请求。
+VLCKit 不需要 dash-to-hls。B 站高画质接口给的是分离的视频 m4s 和音频 m4s，本版本直接交给 VLC 同步两路输入；普通清晰度继续使用 DURL。
 
 ### 附件
 

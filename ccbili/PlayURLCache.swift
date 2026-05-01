@@ -58,7 +58,7 @@ actor PlayURLCache {
     }
 
     private func cacheKey(bvid: String, cid: Int, preferredQuality: Int?) -> String {
-        "\(bvid)-\(cid)-\(preferredQuality ?? 112)"
+        "\(bvid)-\(cid)-\(preferredQuality ?? 80)"
     }
 
     private struct Entry {

@@ -342,7 +342,7 @@ struct BilibiliVLCPlayerView: View {
         let codec = currentSource.videoCodec ?? "unknown"
         let audioCodec = currentSource.audioCodec ?? "none"
         let prefix = "quality=\(quality) video=\(codec) audio=\(audioCodec) cookie=\(cookieStatus)"
-        guard base.contains("DASH-to-HLS") || base.contains("DASH-local-MPD") else { return "\(prefix)\n\(base)" }
+        guard base.contains("DASH-to-HLS") || base.contains("DASH-vlc-slave") else { return "\(prefix)\n\(base)" }
         return "\(prefix)\n\(base)\n\(hlsDiagnosticsText)"
     }
 
@@ -973,10 +973,10 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
 
             loadTask = Task { [weak self] in
                 do {
-                    let playbackURL = try await Self.makePlaybackURL(for: source)
+                    let resource = try await Self.makePlaybackResource(for: source)
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
-                        self?.startPlayback(url: playbackURL)
+                        self?.startPlayback(resource: resource)
                     }
                 } catch {
                     await MainActor.run {
@@ -1052,23 +1052,39 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
             }
         }
 
-        private static func makePlaybackURL(for source: PlayableVideoSource) async throws -> URL {
+        private static func makePlaybackResource(for source: PlayableVideoSource) async throws -> VLCPlaybackResource {
+            LocalHLSProxyServer.shared.resetForForegroundPlayback()
+
             if source.isDASHSeparated {
                 HLSPlaybackDiagnostics.shared.reset()
-                return try await DashMPDManifestService().makeManifest(for: source)
+                let videoURL = try LocalHLSProxyServer.shared.register(mediaURL: source.url, headers: source.headers)
+                let audioURL = try source.audioURL.map {
+                    try LocalHLSProxyServer.shared.register(mediaURL: $0, headers: source.headers)
+                }
+                HLSPlaybackDiagnostics.shared.recordSeparatedDASH(
+                    videoIndex: source.videoIndexRange,
+                    audioIndex: source.audioIndexRange,
+                    duration: source.duration,
+                    videoCodec: source.videoCodec,
+                    audioCodec: source.audioCodec
+                )
+                try await LocalHLSProxyServer.shared.waitUntilReady()
+                return VLCPlaybackResource(url: videoURL, audioSlaveURL: audioURL)
             }
 
-            LocalHLSProxyServer.shared.resetForForegroundPlayback()
             let playbackURL = try LocalHLSProxyServer.shared.register(mediaURL: source.url, headers: source.headers)
             try await LocalHLSProxyServer.shared.waitUntilReady()
-            return playbackURL
+            return VLCPlaybackResource(url: playbackURL, audioSlaveURL: nil)
         }
 
-        private func startPlayback(url: URL) {
-            let media = VLCMedia(url: url)
-            media.addOption(":network-caching=600")
+        private func startPlayback(resource: VLCPlaybackResource) {
+            let media = VLCMedia(url: resource.url)
+            media.addOption(":network-caching=900")
             media.addOption(":http-reconnect")
             media.addOption(":http-continuous")
+            if let audioSlaveURL = resource.audioSlaveURL {
+                media.addOption(":input-slave=\(audioSlaveURL.absoluteString)")
+            }
             player.media = media
             if let drawableView {
                 player.drawable = drawableView
@@ -1169,6 +1185,11 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
             }
         }
     }
+}
+
+private struct VLCPlaybackResource {
+    let url: URL
+    let audioSlaveURL: URL?
 }
 
 final class VLCPlayerContainerView: UIView {}

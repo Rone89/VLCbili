@@ -70,15 +70,6 @@ final class LocalHLSProxyServer {
         )
     }
 
-    func registerMPD(_ content: String, name: String) throws -> URL {
-        try registerText(
-            content,
-            name: name,
-            pathPrefix: "mpd",
-            contentType: "application/dash+xml; charset=utf-8"
-        )
-    }
-
     private func registerText(
         _ content: String,
         name: String,
@@ -174,9 +165,8 @@ final class LocalHLSProxyServer {
         }
 
         let path = String(requestParts[1])
-        if path.hasPrefix("/hls/") || path.hasPrefix("/mpd/") {
-            let prefix = path.hasPrefix("/hls/") ? "/hls/" : "/mpd/"
-            let id = String(path.dropFirst(prefix.count).split(separator: "?").first ?? "")
+        if path.hasPrefix("/hls/") {
+            let id = String(path.dropFirst("/hls/".count).split(separator: "?").first ?? "")
             guard let textRoute = textRoutes[id] else {
                 HLSPlaybackDiagnostics.shared.recordPlaylist(path: path, status: 404)
                 send(status: 404, body: Data(), connection: connection)
@@ -293,6 +283,9 @@ final class LocalHLSProxyServer {
         private var responseStatus = 502
         private var responseRange: String?
         private var didSendHeaders = false
+        private var pendingWrites: [Data] = []
+        private var isWriting = false
+        private var shouldFinishAfterWrites = false
         private var selfRetainer: MediaRouteStreamer?
 
         init(
@@ -379,7 +372,7 @@ final class LocalHLSProxyServer {
         func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
             guard method != "HEAD" else { return }
             deliveredBytes += data.count
-            connection.send(content: data, completion: .contentProcessed { _ in })
+            enqueueWrite(data)
         }
 
         func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -405,10 +398,7 @@ final class LocalHLSProxyServer {
                 responseRange: responseRange,
                 bytes: deliveredBytes
             )
-            connection.send(content: nil, isComplete: true, completion: .contentProcessed { [weak self] _ in
-                self?.connection.cancel()
-                self?.finish()
-            })
+            finishAfterPendingWrites()
         }
 
         private func sendHeaders(status: Int, headers: [String: String]) {
@@ -430,7 +420,56 @@ final class LocalHLSProxyServer {
             }
             headerLines.append("")
             headerLines.append("")
-            connection.send(content: Data(headerLines.joined(separator: "\r\n").utf8), completion: .contentProcessed { _ in })
+            enqueueWrite(Data(headerLines.joined(separator: "\r\n").utf8))
+        }
+
+        private func enqueueWrite(_ data: Data) {
+            pendingWrites.append(data)
+            sendNextWriteIfNeeded()
+        }
+
+        private func sendNextWriteIfNeeded() {
+            guard !isWriting else { return }
+
+            if pendingWrites.isEmpty {
+                guard shouldFinishAfterWrites else { return }
+                shouldFinishAfterWrites = false
+                isWriting = true
+                connection.send(content: nil, isComplete: true, completion: .contentProcessed { [weak self] _ in
+                    self?.delegateQueue.addOperation {
+                        guard let self else { return }
+                        self.isWriting = false
+                        self.connection.cancel()
+                        self.finish()
+                    }
+                })
+                return
+            }
+
+            let data = pendingWrites.removeFirst()
+            isWriting = true
+            connection.send(content: data, completion: .contentProcessed { [weak self] error in
+                self?.delegateQueue.addOperation {
+                    guard let self else { return }
+                    self.isWriting = false
+                    if let error {
+                        HLSPlaybackDiagnostics.shared.recordProxyError(
+                            path: self.path,
+                            requestRange: self.rangeHeader,
+                            message: error.localizedDescription
+                        )
+                        self.connection.cancel()
+                        self.finish()
+                        return
+                    }
+                    self.sendNextWriteIfNeeded()
+                }
+            })
+        }
+
+        private func finishAfterPendingWrites() {
+            shouldFinishAfterWrites = true
+            sendNextWriteIfNeeded()
         }
 
         private func sendErrorResponse(message: String) {

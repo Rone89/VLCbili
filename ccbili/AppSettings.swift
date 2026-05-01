@@ -8,7 +8,7 @@ enum AppSettings {
 enum PlaybackPreferences {
     static var preferredQuality: Int {
         let storedQuality = UserDefaults.standard.integer(forKey: AppSettings.preferredPlaybackQualityKey)
-        return storedQuality > 80 ? storedQuality : 112
+        return storedQuality > 0 ? storedQuality : 80
     }
 
     static func savePreferredQuality(_ quality: Int) {

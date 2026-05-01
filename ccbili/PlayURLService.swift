@@ -34,7 +34,7 @@ struct PlayableVideoSource: Equatable {
 }
 
 struct PlayURLService {
-    private let defaultPreferredQuality = 112
+    private let defaultPreferredQuality = 80
     private let qualityFallbackOrder = [112, 116, 80, 74, 64, 32, 16, 6]
 
     func fetchPlayableSource(
@@ -171,7 +171,7 @@ struct PlayURLService {
                 quality: selectedQuality,
                 qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
                 availableQualities: qualityOptions(from: data),
-                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH-local-MPD", headers: headers),
+                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH-vlc-slave", headers: headers),
                 bvid: bvid,
                 cid: cid
             )

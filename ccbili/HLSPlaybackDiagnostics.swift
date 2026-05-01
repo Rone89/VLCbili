@@ -34,10 +34,10 @@ final class HLSPlaybackDiagnostics {
         lock.unlock()
     }
 
-    func recordMPD(videoIndex: String?, audioIndex: String?, duration: TimeInterval?, videoCodec: String?, audioCodec: String?) {
+    func recordSeparatedDASH(videoIndex: String?, audioIndex: String?, duration: TimeInterval?, videoCodec: String?, audioCodec: String?) {
         lock.lock()
         let durationText = duration.map { String(format: "%.1f", $0) } ?? "nil"
-        manifestText = "manifest=mpd duration=\(durationText) vi=\(videoIndex ?? "nil") ai=\(audioIndex ?? "nil") codecs=\(videoCodec ?? "nil")/\(audioCodec ?? "nil")"
+        manifestText = "manifest=vlc-slave duration=\(durationText) vi=\(videoIndex ?? "nil") ai=\(audioIndex ?? "nil") codecs=\(videoCodec ?? "nil")/\(audioCodec ?? "nil")"
         lock.unlock()
     }
 
