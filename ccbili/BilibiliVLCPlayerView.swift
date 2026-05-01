@@ -342,7 +342,7 @@ struct BilibiliVLCPlayerView: View {
         let codec = currentSource.videoCodec ?? "unknown"
         let audioCodec = currentSource.audioCodec ?? "none"
         let prefix = "quality=\(quality) video=\(codec) audio=\(audioCodec) cookie=\(cookieStatus)"
-        guard base.contains("DASH-to-HLS") || base.contains("DASH-vlc-slave") else { return "\(prefix)\n\(base)" }
+        guard base.contains("DASH-to-HLS") || base.contains("DASH-direct-vlc-slave") || base.contains("DURL") else { return "\(prefix)\n\(base)" }
         return "\(prefix)\n\(base)\n\(hlsDiagnosticsText)"
     }
 
@@ -1053,14 +1053,8 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
         }
 
         private static func makePlaybackResource(for source: PlayableVideoSource) async throws -> VLCPlaybackResource {
-            LocalHLSProxyServer.shared.resetForForegroundPlayback()
-
             if source.isDASHSeparated {
                 HLSPlaybackDiagnostics.shared.reset()
-                let videoURL = try LocalHLSProxyServer.shared.register(mediaURL: source.url, headers: source.headers)
-                let audioURL = try source.audioURL.map {
-                    try LocalHLSProxyServer.shared.register(mediaURL: $0, headers: source.headers)
-                }
                 HLSPlaybackDiagnostics.shared.recordSeparatedDASH(
                     videoIndex: source.videoIndexRange,
                     audioIndex: source.audioIndexRange,
@@ -1068,23 +1062,28 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
                     videoCodec: source.videoCodec,
                     audioCodec: source.audioCodec
                 )
-                try await LocalHLSProxyServer.shared.waitUntilReady()
-                return VLCPlaybackResource(url: videoURL, audioSlaveURL: audioURL)
+                return VLCPlaybackResource(url: source.url, audioSlaveURL: source.audioURL, headers: source.headers)
             }
 
-            let playbackURL = try LocalHLSProxyServer.shared.register(mediaURL: source.url, headers: source.headers)
-            try await LocalHLSProxyServer.shared.waitUntilReady()
-            return VLCPlaybackResource(url: playbackURL, audioSlaveURL: nil)
+            HLSPlaybackDiagnostics.shared.reset()
+            HLSPlaybackDiagnostics.shared.recordDirectPlayback(
+                duration: source.duration,
+                quality: source.quality,
+                codec: source.videoCodec
+            )
+            return VLCPlaybackResource(url: source.url, audioSlaveURL: nil, headers: source.headers)
         }
 
         private func startPlayback(resource: VLCPlaybackResource) {
             let media = VLCMedia(url: resource.url)
-            media.addOption(":network-caching=900")
+            media.addOption(":network-caching=1000")
             media.addOption(":http-reconnect")
             media.addOption(":http-continuous")
+            addHTTPOptions(to: media, headers: resource.headers)
             if let audioSlaveURL = resource.audioSlaveURL {
                 media.addOption(":input-slave=\(audioSlaveURL.absoluteString)")
             }
+            player.rate = 1
             player.media = media
             if let drawableView {
                 player.drawable = drawableView
@@ -1092,8 +1091,24 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
             HLSPlaybackDiagnostics.shared.recordPlayerStatus("opening")
             if shouldAutoplay {
                 player.play()
+                player.rate = 1
             }
             updatePlaybackState()
+        }
+
+        private func addHTTPOptions(to media: VLCMedia, headers: [String: String]) {
+            if let userAgent = headers["User-Agent"], !userAgent.isEmpty {
+                media.addOption(":http-user-agent=\(userAgent)")
+            }
+
+            if let referer = headers["Referer"], !referer.isEmpty {
+                media.addOption(":http-referrer=\(referer)")
+            }
+
+            if let cookie = headers["Cookie"], !cookie.isEmpty {
+                media.addOption(":http-cookie=\(cookie)")
+                media.addOption(":http-forward-cookies")
+            }
         }
 
         func mediaPlayerStateChanged(_ aNotification: Notification!) {
@@ -1190,6 +1205,7 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
 private struct VLCPlaybackResource {
     let url: URL
     let audioSlaveURL: URL?
+    let headers: [String: String]
 }
 
 final class VLCPlayerContainerView: UIView {}
