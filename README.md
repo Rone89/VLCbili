@@ -2,7 +2,7 @@
 
 ## 本地构建
 
-项目播放器依赖 MobileVLCKit。首次打开工程前先安装 CocoaPods 依赖：
+项目播放器依赖 MobileVLCKit 3.6.0。首次打开工程前先安装 CocoaPods 依赖：
 
 ```sh
 pod install

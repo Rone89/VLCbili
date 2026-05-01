@@ -9,7 +9,7 @@
 
 ### 构建说明
 
-- 新增 CocoaPods 依赖：`MobileVLCKit 4.0.0a2`。
+- 新增 CocoaPods 依赖：`MobileVLCKit 3.6.0`。
 - 本地首次构建需执行 `pod install`，之后使用 `ccbili.xcworkspace` 打开项目。
 - GitHub Actions 已切换为先安装 Pods，再使用 workspace 构建未签名 IPA。
 
