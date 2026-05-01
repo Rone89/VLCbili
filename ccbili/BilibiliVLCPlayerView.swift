@@ -342,7 +342,7 @@ struct BilibiliVLCPlayerView: View {
         let codec = currentSource.videoCodec ?? "unknown"
         let audioCodec = currentSource.audioCodec ?? "none"
         let prefix = "quality=\(quality) video=\(codec) audio=\(audioCodec) cookie=\(cookieStatus)"
-        guard base.contains("DASH-to-HLS") else { return "\(prefix)\n\(base)" }
+        guard base.contains("DASH-to-HLS") || base.contains("DASH-local-MPD") else { return "\(prefix)\n\(base)" }
         return "\(prefix)\n\(base)\n\(hlsDiagnosticsText)"
     }
 
@@ -1055,7 +1055,7 @@ private struct BilibiliVLCVideoSurface: UIViewRepresentable {
         private static func makePlaybackURL(for source: PlayableVideoSource) async throws -> URL {
             if source.isDASHSeparated {
                 HLSPlaybackDiagnostics.shared.reset()
-                return try await DashHLSManifestService().makeManifest(for: source)
+                return try await DashMPDManifestService().makeManifest(for: source)
             }
 
             LocalHLSProxyServer.shared.resetForForegroundPlayback()

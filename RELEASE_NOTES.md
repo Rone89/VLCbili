@@ -1,11 +1,14 @@
-## v0.1.155-202605011428
+## v0.1.156-202605011450
 
 ### 修复
 
-- 修复 VLCKit 播放时本地媒体代理反复重启导致端口占用或监听未就绪，从而视频一直停在加载状态的问题。
-- 每条媒体代理路由独立保存 B 站请求头，避免切换视频或清晰度后旧路由被新请求头覆盖。
-- 支持 VLC 对本地 HLS / 媒体地址发起的 `HEAD` 探测请求，并在 CDN 重定向后继续补齐 Referer、Cookie、Range 等请求头。
-- DASH 转 HLS 时会把音频分片也计入 `TARGETDURATION`，提升 VLC 解析兼容性。
+- 将 1080P+ 等 DASH 分离音视频播放从本地 HLS master playlist 改为本地 DASH MPD manifest，交给 VLCKit/libVLC 原生 DASH 解析。
+- 本地 MPD 中的视频、音频 `BaseURL` 都走代理，继续补齐 B 站 CDN 需要的 Referer、Cookie、User-Agent、Range 等请求头。
+- 代理支持 `application/dash+xml` 清单响应，播放诊断会显示 MPD 的 range、时长和 codec 信息。
+
+### 说明
+
+VLCKit 不需要 dash-to-hls；但 B 站接口返回的是独立 video/audio m4s 地址，而不是一个可直接播放的 MPD 文件。本版本改为在本地生成 MPD，避免 VLC 一直反复读取 HLS master 却不进入分片请求。
 
 ### 附件
 

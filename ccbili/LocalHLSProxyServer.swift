@@ -11,7 +11,7 @@ final class LocalHLSProxyServer {
     private var readyContinuations: [CheckedContinuation<Void, Error>] = []
     private var routes: [String: Route] = [:]
     private var routeCounter = 0
-    private var playlists: [String: String] = [:]
+    private var textRoutes: [String: TextRoute] = [:]
     private var playlistCounter = 0
 
     private init() {}
@@ -20,7 +20,7 @@ final class LocalHLSProxyServer {
         queue.sync {
             routes.removeAll()
             routeCounter = 0
-            playlists.removeAll()
+            textRoutes.removeAll()
             playlistCounter = 0
 
             if case .failed = listenerState {
@@ -62,13 +62,36 @@ final class LocalHLSProxyServer {
     }
 
     func registerPlaylist(_ content: String, name: String) throws -> URL {
+        try registerText(
+            content,
+            name: name,
+            pathPrefix: "hls",
+            contentType: "application/vnd.apple.mpegurl; charset=utf-8"
+        )
+    }
+
+    func registerMPD(_ content: String, name: String) throws -> URL {
+        try registerText(
+            content,
+            name: name,
+            pathPrefix: "mpd",
+            contentType: "application/dash+xml; charset=utf-8"
+        )
+    }
+
+    private func registerText(
+        _ content: String,
+        name: String,
+        pathPrefix: String,
+        contentType: String
+    ) throws -> URL {
         try queue.sync {
             try startIfNeeded()
             playlistCounter += 1
             let safeName = name.replacingOccurrences(of: "/", with: "-")
             let id = "\(playlistCounter)-\(safeName)"
-            playlists[id] = content
-            return URL(string: "http://127.0.0.1:\(serverPort)/hls/\(id)")!
+            textRoutes[id] = TextRoute(content: content, contentType: contentType)
+            return URL(string: "http://127.0.0.1:\(serverPort)/\(pathPrefix)/\(id)")!
         }
     }
 
@@ -151,9 +174,10 @@ final class LocalHLSProxyServer {
         }
 
         let path = String(requestParts[1])
-        if path.hasPrefix("/hls/") {
-            let id = String(path.dropFirst("/hls/".count).split(separator: "?").first ?? "")
-            guard let playlist = playlists[id] else {
+        if path.hasPrefix("/hls/") || path.hasPrefix("/mpd/") {
+            let prefix = path.hasPrefix("/hls/") ? "/hls/" : "/mpd/"
+            let id = String(path.dropFirst(prefix.count).split(separator: "?").first ?? "")
+            guard let textRoute = textRoutes[id] else {
                 HLSPlaybackDiagnostics.shared.recordPlaylist(path: path, status: 404)
                 send(status: 404, body: Data(), connection: connection)
                 return
@@ -162,10 +186,10 @@ final class LocalHLSProxyServer {
             send(
                 status: 200,
                 headers: [
-                    "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+                    "Content-Type": textRoute.contentType,
                     "Cache-Control": "no-cache"
                 ],
-                body: Data(playlist.utf8),
+                body: Data(textRoute.content.utf8),
                 connection: connection,
                 sendsBody: method != "HEAD"
             )
@@ -249,6 +273,11 @@ final class LocalHLSProxyServer {
     private struct Route {
         let url: URL
         let headers: [String: String]
+    }
+
+    private struct TextRoute {
+        let content: String
+        let contentType: String
     }
 
     private final class MediaRouteStreamer: NSObject, URLSessionDataDelegate {

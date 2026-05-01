@@ -171,7 +171,7 @@ struct PlayURLService {
                 quality: selectedQuality,
                 qualityDescription: selectedQuality.map(qualityText(for:)) ?? qualityText(from: data),
                 availableQualities: qualityOptions(from: data),
-                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH-to-HLS-local", headers: headers),
+                debugDescription: playURLDebugDescription(data: data, selectedVideo: video, sourceType: "DASH-local-MPD", headers: headers),
                 bvid: bvid,
                 cid: cid
             )
