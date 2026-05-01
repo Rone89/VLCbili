@@ -183,17 +183,28 @@ struct BilibiliVLCPlayerView: View {
     }
 
     private var videoSurface: some View {
-        BilibiliVLCVideoSurface(
-            source: currentSource,
-            playbackState: playbackState,
-            commandCenter: commandCenter,
-            onVideoSizeChange: onVideoSizeChange
-        )
-            .id(surfaceID)
-            .background(.black)
-            .onChange(of: currentSource) { _, _ in
-                didReceiveFirstProgress = false
+        Group {
+            if currentSource.isDASHSeparated {
+                BilibiliVLCVideoSurface(
+                    source: currentSource,
+                    playbackState: playbackState,
+                    commandCenter: commandCenter,
+                    onVideoSizeChange: onVideoSizeChange
+                )
+            } else {
+                BilibiliAVPlayerVideoSurface(
+                    source: currentSource,
+                    playbackState: playbackState,
+                    commandCenter: commandCenter,
+                    onVideoSizeChange: onVideoSizeChange
+                )
             }
+        }
+        .id(surfaceID)
+        .background(.black)
+        .onChange(of: currentSource) { _, _ in
+            didReceiveFirstProgress = false
+        }
     }
 
     @ViewBuilder
@@ -891,6 +902,276 @@ private struct VLCDrawableHost: UIViewRepresentable {
     }
 }
 
+private struct BilibiliAVPlayerVideoSurface: UIViewRepresentable {
+    let source: PlayableVideoSource
+    let playbackState: BilibiliVLCPlaybackState
+    let commandCenter: BilibiliVLCCommandCenter
+    let onVideoSizeChange: (CGSize) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            playbackState: playbackState,
+            commandCenter: commandCenter,
+            onVideoSizeChange: onVideoSizeChange
+        )
+    }
+
+    func makeUIView(context: Context) -> AVPlayerContainerView {
+        let view = AVPlayerContainerView()
+        view.backgroundColor = .black
+        context.coordinator.attach(to: view)
+        context.coordinator.play(source: source)
+        return view
+    }
+
+    func updateUIView(_ uiView: AVPlayerContainerView, context: Context) {
+        context.coordinator.onVideoSizeChange = onVideoSizeChange
+        context.coordinator.attach(to: uiView)
+        context.coordinator.play(source: source)
+    }
+
+    static func dismantleUIView(_ uiView: AVPlayerContainerView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    final class Coordinator {
+        private let player = AVPlayer()
+        private weak var containerView: AVPlayerContainerView?
+        private weak var playbackState: BilibiliVLCPlaybackState?
+        private weak var commandCenter: BilibiliVLCCommandCenter?
+        private var currentSource: PlayableVideoSource?
+        private var statusObserver: NSKeyValueObservation?
+        private var timeObserver: Any?
+        private var shouldAutoplay = true
+        var onVideoSizeChange: (CGSize) -> Void
+
+        init(
+            playbackState: BilibiliVLCPlaybackState,
+            commandCenter: BilibiliVLCCommandCenter,
+            onVideoSizeChange: @escaping (CGSize) -> Void
+        ) {
+            self.playbackState = playbackState
+            self.commandCenter = commandCenter
+            self.onVideoSizeChange = onVideoSizeChange
+            bindCommands()
+        }
+
+        deinit {
+            stop()
+        }
+
+        func attach(to view: AVPlayerContainerView) {
+            containerView = view
+            view.playerLayer.player = player
+            view.playerLayer.videoGravity = .resizeAspect
+        }
+
+        func play(source: PlayableVideoSource) {
+            guard source != currentSource else { return }
+            currentSource = source
+            shouldAutoplay = true
+            configureAudioSession()
+            playbackState?.resetForNewMedia()
+            statusObserver?.invalidate()
+            statusObserver = nil
+            removeTimeObserver()
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+
+            HLSPlaybackDiagnostics.shared.reset()
+            HLSPlaybackDiagnostics.shared.recordDirectPlayback(
+                duration: source.duration,
+                quality: source.quality,
+                codec: source.videoCodec
+            )
+
+            let item = AVPlayerItem(asset: AVURLAsset(url: source.url, options: assetOptions(headers: source.headers)))
+            item.preferredForwardBufferDuration = 1.5
+            observe(item: item)
+            player.automaticallyWaitsToMinimizeStalling = true
+            player.replaceCurrentItem(with: item)
+            addTimeObserver()
+            if shouldAutoplay {
+                player.playImmediately(atRate: 1)
+            }
+            updatePlaybackState()
+        }
+
+        func stop() {
+            statusObserver?.invalidate()
+            statusObserver = nil
+            removeTimeObserver()
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            containerView?.playerLayer.player = nil
+            currentSource = nil
+            updatePlaybackState()
+        }
+
+        private func bindCommands() {
+            commandCenter?.togglePlayHandler = { [weak self] in
+                guard let self else { return }
+                if self.player.timeControlStatus == .playing {
+                    self.shouldAutoplay = false
+                    self.player.pause()
+                } else {
+                    self.shouldAutoplay = true
+                    self.player.playImmediately(atRate: 1)
+                }
+                self.updatePlaybackState()
+            }
+
+            commandCenter?.playHandler = { [weak self] in
+                guard let self else { return }
+                self.shouldAutoplay = true
+                self.player.playImmediately(atRate: 1)
+                self.updatePlaybackState()
+            }
+
+            commandCenter?.pauseHandler = { [weak self] in
+                guard let self else { return }
+                self.shouldAutoplay = false
+                self.player.pause()
+                self.updatePlaybackState()
+            }
+
+            commandCenter?.seekHandler = { [weak self] position, resumePlayback in
+                guard let self, let duration = self.durationSeconds, duration > 0 else { return }
+                let target = CMTime(seconds: duration * min(max(position, 0), 1), preferredTimescale: 600)
+                self.player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+                    guard let self else { return }
+                    if resumePlayback {
+                        self.shouldAutoplay = true
+                        self.player.playImmediately(atRate: 1)
+                    }
+                    self.playbackState?.pendingSeekPosition = nil
+                    self.updatePlaybackState()
+                }
+            }
+
+            commandCenter?.stopHandler = { [weak self] in
+                self?.stop()
+            }
+
+            commandCenter?.attachDrawableHandler = nil
+        }
+
+        private func observe(item: AVPlayerItem) {
+            statusObserver = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
+                guard let self, observedItem === self.player.currentItem else { return }
+                switch observedItem.status {
+                case .readyToPlay:
+                    HLSPlaybackDiagnostics.shared.recordPlayerStatus("av-ready")
+                    self.updateVideoSize(for: observedItem)
+                    if self.shouldAutoplay {
+                        self.player.playImmediately(atRate: 1)
+                    }
+                case .failed:
+                    HLSPlaybackDiagnostics.shared.recordPlayerStatus("av-failed:\(observedItem.error?.localizedDescription ?? "unknown")")
+                case .unknown:
+                    HLSPlaybackDiagnostics.shared.recordPlayerStatus("av-unknown")
+                @unknown default:
+                    HLSPlaybackDiagnostics.shared.recordPlayerStatus("av-other")
+                }
+                self.updatePlaybackState()
+            }
+        }
+
+        private func addTimeObserver() {
+            removeTimeObserver()
+            timeObserver = player.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+                queue: .main
+            ) { [weak self] _ in
+                self?.updatePlaybackState()
+            }
+        }
+
+        private func removeTimeObserver() {
+            if let timeObserver {
+                player.removeTimeObserver(timeObserver)
+                self.timeObserver = nil
+            }
+        }
+
+        private func updatePlaybackState() {
+            guard let playbackState else { return }
+            let currentTime = player.currentTime().seconds
+            let duration = durationSeconds ?? 0
+
+            if let pendingSeekPosition = playbackState.pendingSeekPosition {
+                playbackState.position = pendingSeekPosition
+            } else if !playbackState.isScrubbing {
+                if duration.isFinite, duration > 0, currentTime.isFinite {
+                    playbackState.position = max(0, min(1, currentTime / duration))
+                } else {
+                    playbackState.position = 0
+                }
+            }
+            playbackState.elapsedText = BilibiliVLCVideoSurface.Coordinator.format(seconds: currentTime)
+            playbackState.durationText = BilibiliVLCVideoSurface.Coordinator.format(seconds: duration)
+            playbackState.isPlaying = player.timeControlStatus == .playing
+        }
+
+        private var durationSeconds: TimeInterval? {
+            let itemDuration = player.currentItem?.duration.seconds ?? 0
+            if itemDuration.isFinite, itemDuration > 0 {
+                return itemDuration
+            }
+
+            if let duration = currentSource?.duration, duration.isFinite, duration > 0 {
+                return duration
+            }
+
+            return nil
+        }
+
+        private func updateVideoSize(for item: AVPlayerItem) {
+            let presentationSize = item.presentationSize
+            if presentationSize.width > 0, presentationSize.height > 0 {
+                onVideoSizeChange(presentationSize)
+                return
+            }
+
+            Task {
+                let tracks = (try? await item.asset.loadTracks(withMediaType: .video)) ?? []
+                guard let track = tracks.first else {
+                    return
+                }
+                let naturalSize = (try? await track.load(.naturalSize)) ?? .zero
+                let transform = (try? await track.load(.preferredTransform)) ?? .identity
+                let transformedSize = naturalSize.applying(transform)
+                let size = CGSize(width: abs(transformedSize.width), height: abs(transformedSize.height))
+                guard size.width > 0, size.height > 0 else { return }
+                await MainActor.run {
+                    self.onVideoSizeChange(size)
+                }
+            }
+        }
+
+        private func assetOptions(headers: [String: String]) -> [String: Any] {
+            var injectedHeaders: [String: String] = [:]
+            for key in ["User-Agent", "Referer", "Origin", "Cookie"] {
+                if let value = headers[key], !value.isEmpty {
+                    injectedHeaders[key] = value
+                }
+            }
+            injectedHeaders["Accept"] = "*/*"
+            return ["AVURLAssetHTTPHeaderFieldsKey": injectedHeaders]
+        }
+
+        private func configureAudioSession() {
+            do {
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.playback, mode: .moviePlayback, options: [])
+                try session.setActive(true)
+            } catch {
+                print("Failed to configure AVPlayer audio session: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
 private struct BilibiliVLCVideoSurface: UIViewRepresentable {
     let source: PlayableVideoSource
     let playbackState: BilibiliVLCPlaybackState
@@ -1209,6 +1490,16 @@ private struct VLCPlaybackResource {
 }
 
 final class VLCPlayerContainerView: UIView {}
+
+final class AVPlayerContainerView: UIView {
+    override class var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+}
 
 private extension View {
     @ViewBuilder

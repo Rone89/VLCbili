@@ -1,10 +1,14 @@
-## v0.1.158-202605012238
+## v0.1.159-202605012256
 
 ### 修复
 
-- 普通 DURL 和 1080P+ DASH 分离流改为由 VLCKit 直接访问 B 站 CDN，不再经由本地代理二次转发，避免画面和声音播放速度异常。
-- VLC 媒体请求直接注入 `User-Agent`、`Referer` 和登录 Cookie，高画质音频继续通过 `input-slave` 交给 VLC 同步。
-- 播放开始时显式重置 VLC 播放速率为 1x，并更新诊断为 `direct-durl` / `direct-vlc-slave`。
+- 普通 1080P/720P/480P 等 DURL 播放改用系统 AVPlayer，不再交给 VLCKit 解复用，避免画面和声音速度异常。
+- AVPlayer 请求会注入 B 站需要的 `User-Agent`、`Referer`、`Origin` 和 Cookie，继续支持登录态播放。
+- 现有播放控制、进度拖动、播放历史和画面比例回调复用同一套控制层；1080P+ 分离音视频仍暂由 VLCKit 处理。
+
+### 说明
+
+如果这版普通清晰度速度正常，但 1080P+ 仍异常，下一步会把分离音视频也迁到 AVFoundation 组合播放。
 
 ### 附件
 
