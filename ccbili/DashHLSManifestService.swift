@@ -94,6 +94,7 @@ struct DashHLSManifestService {
             result["Cookie"] = cookieHeader
         }
         result["Accept"] = "*/*"
+        result["Accept-Encoding"] = "identity"
         return result
     }
 
